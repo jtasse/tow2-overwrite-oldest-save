@@ -2,7 +2,7 @@
 # Run: Right-click -> Run with PowerShell (or: powershell -ExecutionPolicy Bypass -File .\scripts\tow2-ue4ss.ps1)
 
 param(
-    [ValidateSet('status', 'disable-overwrite', 'enable-overwrite', 'disable-all-mods', 'minimal-ue4ss', 'enable-ue4ss-only-overwrite', 'disable-ue4ss', 'enable-ue4ss', 'open-log')]
+    [ValidateSet('status', 'disable-overwrite', 'enable-overwrite', 'disable-all-mods', 'minimal-ue4ss', 'recommended', 'enable-ue4ss-only-overwrite', 'disable-ue4ss', 'enable-ue4ss', 'open-log')]
     [string]$Action = 'status'
 )
 
@@ -81,10 +81,10 @@ switch ($Action) {
         Write-Host "UE4SS ON with zero Lua mods (bisect crash). Use Vortex Console Enabler for ~ if needed."
         Write-Host "If this still crashes, UE4SS core/config is incompatible — try a newer UE4SS experimental build."
     }
-    'enable-ue4ss-only-overwrite' {
+    'recommended' {
         if (Test-Path -LiteralPath $EnabledTxt) { Remove-Item -LiteralPath $EnabledTxt -Force }
         Set-ModLine 'CheatManagerEnablerMod' 0
-        Set-ModLine 'ConsoleCommandsMod' 1
+        Set-ModLine 'ConsoleCommandsMod' 0
         Set-ModLine 'ConsoleEnablerMod' 0
         Set-ModLine 'BPML_GenericFunctions' 0
         Set-ModLine 'BPModLoaderMod' 0
@@ -93,8 +93,11 @@ switch ($Action) {
         if (Test-Path -LiteralPath $DwmApiOff) {
             Rename-Item -LiteralPath $DwmApiOff -NewName 'dwmapi.dll' -Force
         }
-        Write-Host "UE4SS ON: OverwriteOldestSave + ConsoleCommandsMod (Vortex supplies ~)."
-        Write-Host "Test in game: ~ then oow.discover_save"
+        Write-Host "Recommended profile: only OverwriteOldestSave + UE4SS on."
+        Write-Host "Use Vortex Console Enabler for the ~ console."
+    }
+    'enable-ue4ss-only-overwrite' {
+        & $PSCommandPath -Action recommended
     }
     'disable-ue4ss' {
         if (Test-Path -LiteralPath $DwmApi) {
