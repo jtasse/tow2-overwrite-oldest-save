@@ -1,8 +1,19 @@
 local Log = require("log")
+local UiUtil = require("ui_util")
 
 local SaveManager = {}
 
 local cached = nil
+
+local CONSOLE_COMMANDS = {
+    "Quicksave",
+    "SaveGame",
+}
+
+local CALL_FUNCTION_PATHS = {
+    "/Script/Arkansas.SaveGameManager:Quicksave",
+    "/Script/Arkansas.SaveGameManager:SaveGame",
+}
 
 local function is_valid(obj)
     if not obj then
@@ -32,116 +43,82 @@ function SaveManager.get()
     return nil
 end
 
-local function get_ufunction(name)
-    local path = "/Script/Arkansas.SaveGameManager:" .. name
-    local fn = StaticFindObject(path)
-    if is_valid(fn) then
-        return fn
+local function object_label(obj)
+    if not is_valid(obj) then
+        return "invalid"
     end
-    return nil
+    local ok, name = pcall(function()
+        return obj:GetFullName()
+    end)
+    if ok and name then
+        return name
+    end
+    return "object"
 end
 
-local function try_call_function(mgr, ufunc, arg1)
-    if not is_valid(mgr) or not is_valid(ufunc) then
-        return false, "invalid mgr/ufunc"
+local function exec_on_mgr(cmd)
+    local mgr = SaveManager.get()
+    if not mgr then
+        Log.warn("SaveGameManager not found")
+        return false
     end
-    local ok, err = pcall(function()
-        if arg1 == nil then
-            mgr:CallFunction(ufunc)
-        else
-            mgr:CallFunction(ufunc, arg1)
-        end
+    local ok, ret = pcall(function()
+        return mgr:ProcessConsoleExec(cmd, nil, mgr)
     end)
-    return ok, err
+    if not ok then
+        Log.warn(string.format("ProcessConsoleExec '%s' error: %s", cmd, tostring(ret)))
+        return false
+    end
+    Log.info(string.format("ProcessConsoleExec '%s' on %s -> %s", cmd, object_label(mgr), tostring(ret)))
+    return ret == true
 end
 
-local function try_console_exec(mgr, cmd)
-    if not is_valid(mgr) then
-        return false, "invalid mgr"
+local function call_mgr_function(function_path)
+    local mgr = SaveManager.get()
+    if not mgr then
+        return false, "no manager"
     end
-    local ok, err = pcall(function()
-        mgr:ProcessConsoleExec(cmd, nil, mgr)
-    end)
-    return ok, err
+    local ok, err = UiUtil.call_function(mgr, function_path)
+    if ok then
+        Log.info("CallFunction OK: " .. function_path)
+        return true, function_path
+    end
+    Log.warn("CallFunction failed: " .. function_path .. " — " .. tostring(err))
+    return false, err
 end
 
 function SaveManager.delete_slot(slot_id)
-    local mgr = SaveManager.get()
-    if not mgr then
-        return false, "SaveGameManager not found"
+    local id = tostring(slot_id)
+    if exec_on_mgr("DeleteGame " .. id) then
+        Log.info("DeleteGame OK for " .. id)
+        return true
     end
-
-    local ufunc = get_ufunction("DeleteGame")
-    if ufunc then
-        local attempts = {
-            function() return try_call_function(mgr, ufunc, slot_id) end,
-            function() return try_call_function(mgr, ufunc) end,
-            function() return try_console_exec(mgr, "DeleteGame " .. slot_id) end,
-        }
-        for i, attempt in ipairs(attempts) do
-            local ok, err = attempt()
-            if ok then
-                Log.info("DeleteGame succeeded (attempt " .. i .. ")")
-                return true
-            end
-            Log.warn("DeleteGame attempt " .. i .. " failed: " .. tostring(err))
-        end
-    end
-
-    return false, "DeleteGame failed"
+    Log.warn("DeleteGame failed for " .. id)
+    return false
 end
 
-function SaveManager.save_current()
-    local mgr = SaveManager.get()
-    if not mgr then
-        return false, "SaveGameManager not found"
-    end
-
-    local ufunc = get_ufunction("SaveGame")
-    if ufunc then
-        local attempts = {
-            function() return try_call_function(mgr, ufunc) end,
-            function() return try_call_function(mgr, ufunc, true) end, -- bool overwrite flag guess
-            function() return try_console_exec(mgr, "SaveGame") end,
-        }
-        for i, attempt in ipairs(attempts) do
-            local ok, err = attempt()
-            if ok then
-                Log.info("SaveGame succeeded (attempt " .. i .. ")")
-                return true
-            end
-            Log.warn("SaveGame attempt " .. i .. " failed: " .. tostring(err))
+function SaveManager.quicksave()
+    for _, cmd in ipairs(CONSOLE_COMMANDS) do
+        if exec_on_mgr(cmd) then
+            return true, cmd
         end
     end
 
-    return false, "SaveGame failed"
+    for _, path in ipairs(CALL_FUNCTION_PATHS) do
+        local ok, detail = call_mgr_function(path)
+        if ok then
+            return true, detail
+        end
+    end
+
+    return false, nil
 end
 
-local function safe_tostring(v)
-    local ok, s = pcall(function()
-        if type(v) == "userdata" and v.ToString then
-            return v:ToString()
-        end
-        return tostring(v)
-    end)
-    return ok and s or "<unprintable>"
+function SaveManager.save_manual()
+    return SaveManager.quicksave()
 end
 
 function SaveManager.install_param_logger()
-    local function log_hook(self, ...)
-        Log.info("SaveGameManager hook on " .. self:GetFullName())
-        local n = select("#", ...)
-        for i = 1, n do
-            Log.info("  arg[" .. i .. "] = " .. safe_tostring(select(i, ...)))
-        end
-    end
-
-    pcall(function()
-        RegisterHook("/Script/Arkansas.SaveGameManager:SaveGame", log_hook)
-    end)
-    pcall(function()
-        RegisterHook("/Script/Arkansas.SaveGameManager:DeleteGame", log_hook)
-    end)
 end
 
 return SaveManager

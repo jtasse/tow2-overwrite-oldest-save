@@ -1,35 +1,49 @@
 # Discovery (FModel + in-game)
 
-Goal: pause menu **Save Game** submenu → row **Overwrite oldest save** (only when 100/100 manual) → confirmation → call `SaveGameManager` to replace the oldest slot.
+## Current product goal (v0.6.x)
 
-## 1. Install UE4SS on dev PC
+**Quick save** from gameplay:
 
-See [INSTALL-DEV.md](./INSTALL-DEV.md). Use the [OW2 custom `UE4SS-settings.ini`](https://github.com/UE4SS-RE/RE-UE4SS/tree/main/assets/CustomGameConfigs/The%20Outer%20Worlds%202) from the UE4SS release zip (`zCustomGameConfigs.zip`).
+- **Below 100/100:** `SaveGameManager.Quicksave` via `ProcessConsoleExec`
+- **At 100/100:** `DeleteGame <oldest GUID>` then `Quicksave`
+- Oldest GUID from `%LOCALAPPDATA%\OverwriteOldestSave-save-cache.json` (built by `scripts/refresh-save-cache.ps1`)
+
+Pause-menu **Save Game** row injection is **disabled** (`Config.MENU.AUTO_INJECT = false`) on stock UE4SS 3.0.1 for this game.
+
+## 1. Install UE4SS
+
+See [INSTALL-DEV.md](./INSTALL-DEV.md). Use the [OW2 `UE4SS-settings.ini`](https://github.com/UE4SS-RE/RE-UE4SS/tree/main/assets/CustomGameConfigs/The%20Outer%20Worlds%202) from `zCustomGameConfigs.zip`.
 
 - `bUseUObjectArrayCache = false`
-- If BP hooks are required and startup warns about `ProcessLocalScriptFunction`, try `HookProcessLocalScriptFunction = 0` in the Hooks section (limits `/Game/` `RegisterHook`).
-
-Deploy this mod, enable in `ue4ss/Mods/mods.txt`:
+- `ProcessLocalScriptFunction` is **not** available on TOW2 3.0.1 — Blueprint `/Game/` `RegisterHook` paths do not run.
 
 ```
 OverwriteOldestSave : 1
 ```
 
-## 2. In-game probes (mod already ships these)
-
-Open the UE console (`~` with Console Enabler) after loading a save:
+## 2. In-game commands
 
 | Command | Purpose |
 |---------|---------|
-| `oow.discover_save` | Safe in-game probe of `SaveGameManager` fields (no PowerShell). |
-| `oow.overwrite_oldest` | Starts confirm flow (dev stand-in for pause menu). |
-| `oow.overwrite_confirm` | Executes overwrite after confirm. |
+| `oow.save` | Quick save (delete oldest if cache ≥ 100, then Quicksave) |
+| `oow.reload_cache` | Re-read cache JSON after host `refresh-save-cache.ps1` |
+| `oow.save_health` | Cache count + cap hints |
+| `oow.discover_save` | Log `SaveGameManager` + cache (no PowerShell in-game) |
+| `oow.discover_gamepad` | Log active `Gamepad_*` key names while pressing buttons |
+| `oow.discover_ui` | Log pause/save widget names (future menu inject) |
 
-**Filesystem save count (outside game):** `.\scripts\scan-saves.ps1` in PowerShell — never run file scans from inside UE4SS.
+**Outside game only:**
 
-### What to paste back (be explicit)
+```powershell
+.\scripts\scan-saves.ps1
+.\scripts\refresh-save-cache.ps1
+```
 
-After `oow.discover_save`, open the log (`.\scripts\tow2-ue4ss.ps1 open-log`) and copy **only the block between**:
+Never run filesystem scans from inside UE4SS Lua.
+
+### `oow.discover_save` — what to paste
+
+Copy the block in `UE4SS.log` between:
 
 ```
 === OverwriteOldestSave discovery (in-game only) ===
@@ -37,45 +51,56 @@ After `oow.discover_save`, open the log (`.\scripts\tow2-ue4ss.ps1 open-log`) an
 === end discovery ===
 ```
 
-Example of what we need inside that block:
+Useful lines: `SaveGameManager: ...`, property names, `manual_folders=100`, `oldest=...`.
 
-```
-SaveGameManager: SaveGameManager_123
-  ManualSaveCount = 100
-  MaxManualSaves = 100
-```
+### `oow.discover_gamepad` — tuning LB+RB+A
 
-Any line with a property name and value helps. If you only see `SaveGameManager: ...` and nothing else, say that — we’ll add more property names.
+Default combo (see `config.lua` → `Config.INPUT.GAMEPAD`):
 
-**After one normal manual save**, also paste any lines containing `SaveGameManager hook` and `arg[1]`, `arg[2]`, etc.
+- Hold **LB** (`Gamepad_LeftShoulder`)
+- Hold **RB** (`Gamepad_RightShoulder`)
+- Tap **A** (`Gamepad_FaceButton_Bottom`)
 
-## 3. FModel searches (1.256.9237)
+If buttons do not fire, run discovery while pressing each button and update `left` / `right` / `action` name lists in config.
 
-Pak path: `Arkansas\Content\Paks\`
+## 3. SaveGameManager APIs (confirmed via console gist / logs)
+
+| Function | Use in mod |
+|----------|------------|
+| `DeleteGame <GUID>` | Remove oldest slot at cap (`ProcessConsoleExec`) |
+| `Quicksave` | Primary save after delete (or alone below cap) |
+| `SaveGame` | **Not used** — tended to create autosaves, not manual list entries |
+| `Autosave` | Not used |
+
+Reference: [TOW2 console command gist](https://gist.github.com/Micrologist/9c62b8f050bf25efbcf207382b1e7574) (`SaveGameManager::Quicksave`, etc.).
+
+## 4. FModel searches (1.256.9237)
+
+Pak: `Arkansas\Content\Paks\`
 
 | Search | Why |
 |--------|-----|
-| `SaveGameManager` | C++ / BP save API, slot list, max manual count |
-| `Pause` + `Menu` | Pause root widget |
-| `Save` + `Game` | Save submenu / “Save Game” row |
-| `Confirm` + `Save` | Existing confirmation dialogs to mirror |
-| `Manual` + `Save` | Slot list UI, “full” detection |
+| `SaveGameManager` | Slot list, save/delete APIs |
+| `Quicksave` | Native quick-save path |
+| `SaveLoadMenu` | Pause save UI (`SaveLoadMenu_BP`) |
+| `Manual` + `Save` | Cap / slot UI |
 
-Record full `UFunction` paths for:
+Future v2: hook pause **Save Game** to call the same quick-save path as `oow.save`.
 
-- Opening pause → Save Game
-- Manual save attempt when full (greyed out / error)
-- Any `CanSave` / `IsSaveSlotsFull` style function
+## 5. Pause menu row (optional, off by default)
 
-Add confirmed hook paths to `Config.MENU_HOOKS` in `scripts/config.lua` and implement `menu.lua` to show/hide the new row when `SavesFs.is_at_cap()` is true.
+To experiment with menu inject:
 
-## 4. Dump Lua bindings (optional)
+1. Set `Config.MENU.AUTO_INJECT = true` in `config.lua` (may crash on Load Game — test carefully).
+2. Open pause → **Save Game**, run `oow.discover_ui`.
+3. Tune `Config.MENU.INJECTION_WIDGET_NAMES` / `ANCHOR_EXCLUDE_PATTERNS` from logs.
 
-UE4SS GUI → Dumpers → **Dump Lua Bindings** → inspect `Mods/shared/types` for `SaveGameManager` fields (`ManualSaveSlots`, filenames, etc.). Do **not** `require` generated type files from the mod.
+## 6. Success criteria
 
-## 5. Success criteria for v1
-
-- [ ] Row visible only at 100 manual saves
-- [ ] Confirmation text matches game style
-- [ ] After confirm, new manual save succeeds without “Save Unsuccessful”
-- [ ] Oldest manual slot file timestamp updates (or slot content replaced in UI)
+- [x] Quick save at &lt; 100 without blocking
+- [x] At 100, delete oldest (engine) + Quicksave
+- [x] Keyboard: Ctrl+Shift+O
+- [x] Gamepad: LB + RB hold, tap A
+- [x] External cache + orphan cleanup via `refresh-save-cache.ps1`
+- [ ] Pause-menu row stable on stock UE4SS 3.0.1 (deferred)
+- [ ] New manual save always appears at top of Save Game list (UI may lag; Quicksave vs manual save distinction)

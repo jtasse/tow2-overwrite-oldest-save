@@ -1,16 +1,42 @@
-# Agent handoff (paste into a chat opened **with this folder** as the workspace)
+# Agent handoff
 
-Continue the TOW2 **Overwrite oldest save** mod.
+TOW2 **quick save** mod (repo name: overwrite-oldest-save).
 
-- **Repo:** `C:\dev\github\tow2-overwrite-oldest-save`
-- **Game:** Xbox PC / Game Pass, version **1.256.9237**
-- **Saves:** at cap (100), backup done
-- **v1:** Pause menu → **Overwrite oldest save** under **Save Game**, only when full → confirmation → overwrite oldest slot
-- **Later:** same action as a row on the save list
-- **Not in scope:** long-press, more save slots mod
-- **Game path:** `C:\XboxGames\The Outer Worlds 2\Content\Arkansas\Binaries\WinGDK\`
-- **Test transfer:** Google Drive to gaming PC; Nexus later
+## Current state (v0.6.2-dev)
 
-**Done in repo (v0.1):** modular UE4SS Lua mod, `oow.*` console commands, Ctrl+Shift+O dev confirm, `SaveGame`/`DeleteGame` param logging, filesystem oldest-manual detection under `%USERPROFILE%\Saved Games\TheOuterWorlds2`.
+| Item | Detail |
+|------|--------|
+| Game | Xbox PC / Game Pass **1.256.9237** |
+| Saves | 100 manual GUID folders under `%USERPROFILE%\Saved Games\TheOuterWorlds2\` |
+| Working flow | `oow.save` / Ctrl+Shift+O / hold LB+RB tap A → below cap: `Quicksave`; at cap: `DeleteGame` oldest + `Quicksave` |
+| Cache | `refresh-save-cache.ps1` on host; mod reads JSON only (no in-game disk scan) |
+| UE4SS | 3.0.1, **only** `OverwriteOldestSave : 1` |
+| Menu inject | **Off** (`AUTO_INJECT = false`) |
 
-**Next:** Install UE4SS on dev PC → run `oow.discover_save` → FModel pause/SaveGame UI → fill `Config.MENU_HOOKS` → wire confirmation widget → tune `DeleteGame`/`SaveGame` args from hook log. See `docs/DISCOVERY.md`.
+## Do not reintroduce without testing
+
+- `io.popen` / in-game PowerShell (freezes pause menu)
+- Filesystem delete of save folders from Lua (registry desync)
+- `RegisterHook` on `SaveGameManager` delete/save (crashes)
+- On-screen `PrintString` right after delete (crashed)
+- Console `SaveGame` as primary save (autosaves, wrong UI)
+- Two-step overwrite / “must use pause Save Game” as required step (removed in v0.6)
+
+## Key files
+
+- `scripts/quick_save.lua` — main logic
+- `scripts/input_bindings.lua` — Ctrl+Shift+O, LB+RB+A
+- `scripts/save_manager.lua` — `DeleteGame`, `Quicksave`
+- `scripts/saves_fs.lua` — cache JSON
+- `scripts/refresh-save-cache.ps1` — host scan + orphan quarantine
+
+## User-facing docs
+
+- [README.md](../README.md) — setup, controls, troubleshooting
+- [DISCOVERY.md](./DISCOVERY.md) — APIs, discovery commands
+
+## Open improvements
+
+- Configurable: overwrite-at-cap on/off, binding remapping in-game
+- Stable pause-menu row calling same `QuickSave.run()`
+- Reliable “newest at top” in Save Game list (may need true manual-save API)
