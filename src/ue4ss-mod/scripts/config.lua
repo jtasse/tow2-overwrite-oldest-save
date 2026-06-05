@@ -8,14 +8,15 @@ Config.USE_ON_SCREEN_FEEDBACK = false
 -- Delay (ms) after DeleteGame before Quicksave.
 Config.POST_DELETE_DELAY_MS = 1500
 
--- Keyboard + gamepad quick save bindings.
+-- Keyboard + gamepad quick save bindings (Key.* resolved at install, not here).
 Config.INPUT = {
     KEYBOARD = {
-        key = Key.O,
-        modifiers = { ModifierKey.CONTROL, ModifierKey.SHIFT },
+        key_name = "O",
+        modifier_names = { "CONTROL", "SHIFT" },
     },
-    GAMEPAD_ENABLED = true,
-    GAMEPAD_POLL_MS = 50,
+    -- Gamepad poll froze WinGDK on LEELOO2; set true + redeploy if LB+RB+A works on your PC.
+    GAMEPAD_ENABLED = false,
+    GAMEPAD_POLL_MS = 200,
     -- Xbox: hold LB + RB, tap A (face button bottom).
     GAMEPAD = {
         left = { "Gamepad_LeftShoulder" },

@@ -7,6 +7,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'lib\game-path.ps1')
+
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Tow2Script = Join-Path $RepoRoot 'scripts\tow2-ue4ss.ps1'
 $RefreshScript = Join-Path $RepoRoot 'scripts\refresh-save-cache.ps1'
@@ -14,7 +16,9 @@ $root = Join-Path $env:USERPROFILE 'Saved Games\TheOuterWorlds2'
 $guidPattern = '^[0-9A-Fa-f]{32}$'
 $RecoveryFile = Join-Path $env:LOCALAPPDATA 'OverwriteOldestSave-recovery.txt'
 $BackupRoot = Join-Path $env:LOCALAPPDATA 'OverwriteOldestSave-backup'
-$Ue4ssLog = 'C:\Program Files\WindowsApps\Microsoft.OE-Arkansas_1.256.9237.0_x64__8wekyb3d8bbwe\Arkansas\Binaries\WinGDK\ue4ss\UE4SS.log'
+$WinGDK = Get-Tow2WinGDKRoot
+if (-not $WinGDK) { Write-Error 'TOW2 WinGDK folder not found.' }
+$Ue4ssLog = Join-Path $WinGDK 'ue4ss\UE4SS.log'
 $ModLog = Join-Path $env:LOCALAPPDATA 'OverwriteOldestSave-mod-log.txt'
 
 function Write-Recovery([string[]]$Lines) {

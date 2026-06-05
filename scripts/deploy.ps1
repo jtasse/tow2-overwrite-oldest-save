@@ -1,10 +1,18 @@
 # Copy UE4SS mod into the Game Pass WinGDK install.
 param(
-    [string]$GameRoot = "C:\Program Files\WindowsApps\Microsoft.OE-Arkansas_1.256.9237.0_x64__8wekyb3d8bbwe\Arkansas\Binaries\WinGDK",
+    [string]$GameRoot,
     [switch]$EnableMod
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib\game-path.ps1")
+
+if (-not $GameRoot) {
+    $GameRoot = Get-Tow2WinGDKRoot
+}
+if (-not $GameRoot) {
+    Write-Error "Could not find TOW2 WinGDK folder. Install UE4SS first (see README.md)."
+}
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Src = Join-Path $RepoRoot "src\ue4ss-mod"
 $Dest = Join-Path $GameRoot "ue4ss\Mods\OverwriteOldestSave"

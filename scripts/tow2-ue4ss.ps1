@@ -7,14 +7,25 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$WinGDK = 'C:\Program Files\WindowsApps\Microsoft.OE-Arkansas_1.256.9237.0_x64__8wekyb3d8bbwe\Arkansas\Binaries\WinGDK'
+. (Join-Path $PSScriptRoot 'lib\game-path.ps1')
+
+$WinGDK = Get-Tow2WinGDKRoot
+if (-not $WinGDK) {
+    Write-Error 'TOW2 WinGDK folder not found. Install UE4SS first (see README.md).'
+}
 $Ue4ss = Join-Path $WinGDK 'ue4ss'
 $ModsTxt = Join-Path $Ue4ss 'Mods\mods.txt'
 $EnabledTxt = Join-Path $Ue4ss 'Mods\OverwriteOldestSave\enabled.txt'
 $ModsEnabledTxt = Join-Path $Ue4ss 'Mods\enabled.txt'
 $DwmApi = Join-Path $WinGDK 'dwmapi.dll'
 $DwmApiOff = Join-Path $WinGDK 'dwmapi.dll.off'
-$LogFile = Join-Path $Ue4ss 'UE4SS.log'
+$LogFile = if (Test-Path -LiteralPath (Join-Path $Ue4ss 'UE4SS.log')) {
+    Join-Path $Ue4ss 'UE4SS.log'
+} elseif (Test-Path -LiteralPath (Join-Path $WinGDK 'UE4SS.log')) {
+    Join-Path $WinGDK 'UE4SS.log'
+} else {
+    Join-Path $Ue4ss 'UE4SS.log'
+}
 
 if (-not (Test-Path -LiteralPath $Ue4ss)) {
     Write-Error "UE4SS folder not found: $Ue4ss"

@@ -1,10 +1,15 @@
 # Show whether the mod loaded this session and what it last did.
 param([switch]$Balloon, [switch]$Tail)
 
+. (Join-Path $PSScriptRoot 'lib\game-path.ps1')
+
 $Marker = Join-Path $env:LOCALAPPDATA "OverwriteOldestSave-mod-active.txt"
 $EventLog = Join-Path $env:LOCALAPPDATA "OverwriteOldestSave-mod-log.txt"
 $ConsoleOut = Join-Path $env:LOCALAPPDATA "OverwriteOldestSave-last-console.txt"
-$GameRoot = "C:\Program Files\WindowsApps\Microsoft.OE-Arkansas_1.256.9237.0_x64__8wekyb3d8bbwe\Arkansas\Binaries\WinGDK"
+$GameRoot = Get-Tow2WinGDKRoot
+if (-not $GameRoot) {
+    Write-Error 'TOW2 WinGDK folder not found.'
+}
 $NotifyPs1 = Join-Path $GameRoot "ue4ss\Mods\OverwriteOldestSave\notify.ps1"
 $Ue4ssLog = Join-Path $GameRoot "ue4ss\UE4SS.log"
 

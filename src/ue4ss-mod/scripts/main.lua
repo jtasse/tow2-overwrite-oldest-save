@@ -14,7 +14,6 @@ Log.info("loaded v" .. Config.MOD_VERSION)
 
 SaveManager.install_param_logger()
 Menu.install_hooks()
-InputBindings.install()
 
 local game_ready = false
 local activation_scheduled = false
@@ -31,6 +30,7 @@ local function try_activate_after_load()
 
     game_ready = true
     Log.info("SaveGameManager ready")
+    InputBindings.start_after_load()
     Feedback.show_startup_banner()
     return true
 end

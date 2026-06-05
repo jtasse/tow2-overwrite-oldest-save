@@ -170,20 +170,49 @@ end
 
 local function poll_gamepad_loop()
     ExecuteInGameThread(function()
-        check_gamepad_combo()
+        pcall(check_gamepad_combo)
     end)
     ExecuteWithDelay(Config.INPUT.GAMEPAD_POLL_MS, poll_gamepad_loop)
 end
 
-function InputBindings.install_keyboard()
+local function resolve_keyboard_binding()
     local kb = Config.INPUT.KEYBOARD
-    pcall(function()
-        RegisterKeyBind(kb.key, kb.modifiers, function()
+    if kb.key and kb.modifiers then
+        return kb.key, kb.modifiers
+    end
+    if not Key or not ModifierKey then
+        return nil, nil
+    end
+    local key = Key[kb.key_name or "O"]
+    local mods = {}
+    for _, name in ipairs(kb.modifier_names or {}) do
+        if ModifierKey[name] then
+            mods[#mods + 1] = ModifierKey[name]
+        end
+    end
+    if not key or #mods == 0 then
+        return nil, nil
+    end
+    return key, mods
+end
+
+function InputBindings.install_keyboard()
+    local key, mods = resolve_keyboard_binding()
+    if not key then
+        Log.warn("Keyboard bind skipped (Key API unavailable) — use oow.save in console")
+        return
+    end
+    local ok, err = pcall(function()
+        RegisterKeyBind(key, mods, function()
             Log.info("Keyboard: Ctrl+Shift+O")
             InputBindings.trigger_quick_save()
         end)
-        Log.info("Keyboard: Ctrl+Shift+O = quick save")
     end)
+    if ok then
+        Log.info("Keyboard: Ctrl+Shift+O = quick save")
+    else
+        Log.warn("RegisterKeyBind failed: " .. tostring(err))
+    end
 end
 
 function InputBindings.install_gamepad()
@@ -203,7 +232,14 @@ function InputBindings.install_gamepad()
     ))
 end
 
-function InputBindings.install()
+local bindings_started = false
+
+-- Defer until in-game: early EngineTick / ExecuteInGameThread polling crashed TOW2 at startup.
+function InputBindings.start_after_load()
+    if bindings_started then
+        return
+    end
+    bindings_started = true
     InputBindings.install_keyboard()
     InputBindings.install_gamepad()
 end
