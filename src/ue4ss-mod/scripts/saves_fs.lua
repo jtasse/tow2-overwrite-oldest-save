@@ -132,6 +132,126 @@ function SavesFs.name_in_cache(name)
     return false
 end
 
+local function cap_marker_path()
+    return Config.CAP_MARKER_FILE
+end
+
+function SavesFs.read_host_cap_count()
+    local path = cap_marker_path()
+    if not path or path == "" then
+        return nil
+    end
+    local file = io.open(path, "r")
+    if not file then
+        return nil
+    end
+    local text = file:read("*a")
+    file:close()
+    if not text or text == "" then
+        return nil
+    end
+    local count = tonumber(text:match('"count"%s*:%s*(%d+)'))
+        or tonumber(text:match('"atCap"%s*:%s*true') and tostring(Config.MAX_MANUAL_SAVES))
+    if count and count >= Config.MAX_MANUAL_SAVES then
+        return count
+    end
+    return nil
+end
+
+function SavesFs.write_host_cap_marker(count)
+    local path = cap_marker_path()
+    if not path or path == "" then
+        return false, "LOCALAPPDATA unavailable"
+    end
+    local n = tonumber(count) or Config.MAX_MANUAL_SAVES
+    local payload = string.format(
+        '{"atCap":true,"count":%d,"setAt":"%s","source":"in-game"}',
+        n,
+        os.date("%Y-%m-%dT%H:%M:%SZ")
+    )
+    local file = io.open(path, "w")
+    if not file then
+        return false, "could not write cap marker"
+    end
+    file:write(payload)
+    file:close()
+    Log.info(string.format("Cap marker written: %d/100 -> %s", n, path))
+    return true, string.format("Cap marker set (%d/100).", n)
+end
+
+function SavesFs.clear_host_cap_marker()
+    local path = cap_marker_path()
+    if not path or path == "" then
+        return false, "LOCALAPPDATA unavailable"
+    end
+    os.remove(path)
+    Log.info("Cap marker cleared")
+    return true, "Cap marker cleared — oow.save will not delete until you set cap again."
+end
+
+local function read_bool_property(obj, prop_name)
+    local ok, val = pcall(function()
+        return obj:GetPropertyValue(prop_name)
+    end)
+    if ok and type(val) == "boolean" then
+        return val
+    end
+    ok, val = pcall(function()
+        return obj[prop_name]
+    end)
+    if ok and type(val) == "boolean" then
+        return val
+    end
+    return nil
+end
+
+local function read_number_property(obj, prop_name)
+    local ok, val = pcall(function()
+        return obj:GetPropertyValue(prop_name)
+    end)
+    if ok and type(val) == "number" then
+        return val
+    end
+    ok, val = pcall(function()
+        return obj[prop_name]
+    end)
+    if ok and type(val) == "number" then
+        return val
+    end
+    return nil
+end
+
+local function read_array_length(obj, prop_name)
+    local val = nil
+    local ok = pcall(function()
+        val = obj:GetPropertyValue(prop_name)
+    end)
+    if not ok or val == nil then
+        ok = pcall(function()
+            val = obj[prop_name]
+        end)
+    end
+    if not ok or val == nil then
+        return nil
+    end
+
+    local ok_num, num = pcall(function()
+        return val:GetArrayNum()
+    end)
+    if ok_num and type(num) == "number" and num >= 0 then
+        return num
+    end
+
+    ok_num, num = pcall(function()
+        return #val
+    end)
+    if ok_num and type(num) == "number" and num >= 0 then
+        return num
+    end
+
+    return nil
+end
+
 function SavesFs.get_game_manual_count()
     local SaveManager = require("save_manager")
     local mgr = SaveManager.get()
@@ -139,24 +259,86 @@ function SavesFs.get_game_manual_count()
         return nil
     end
 
+    for _, prop_name in ipairs(Config.SAVE_MANAGER_CAP_BOOL_CANDIDATES or {}) do
+        if read_bool_property(mgr, prop_name) == true then
+            return Config.MAX_MANUAL_SAVES
+        end
+    end
+
+    for _, prop_name in ipairs({ "ManualSaveCount", "NumManualSaves", "NumSaveGames", "SaveGameCount" }) do
+        local val = read_number_property(mgr, prop_name)
+        if val then
+            return val
+        end
+    end
+
+    for _, prop_name in ipairs({ "SaveGames", "ManualSaveSlots", "SaveSlots", "Saves" }) do
+        local len = read_array_length(mgr, prop_name)
+        if len then
+            return len
+        end
+    end
+
     for _, prop_name in ipairs(Config.SAVE_MANAGER_PROPERTY_CANDIDATES) do
-        if string.find(prop_name, "Count", 1, true) or string.find(prop_name, "Num", 1, true) then
-            local ok, val = pcall(function()
-                return mgr:GetPropertyValue(prop_name)
-            end)
-            if ok and type(val) == "number" then
+        if prop_name == "MaxManualSaves" then
+            -- Cap constant, not current occupancy.
+        elseif string.find(prop_name, "Count", 1, true) or string.find(prop_name, "Num", 1, true) then
+            local val = read_number_property(mgr, prop_name)
+            if val then
                 return val
             end
-            ok, val = pcall(function()
-                return mgr[prop_name]
-            end)
-            if ok and type(val) == "number" then
-                return val
+        else
+            local len = read_array_length(mgr, prop_name)
+            if len then
+                return len
             end
         end
     end
 
     return nil
+end
+
+function SavesFs.resolve_cap_state()
+    local game = SavesFs.get_game_manual_count()
+    local disk = SavesFs.manual_save_count()
+    local host_cap = SavesFs.read_host_cap_count()
+
+    local at_cap = false
+    local source = nil
+    local count = game
+
+    if game and game >= Config.MAX_MANUAL_SAVES then
+        at_cap = true
+        source = "engine"
+    elseif Config.AT_CAP_OVERRIDE then
+        at_cap = true
+        source = "config"
+        count = Config.MAX_MANUAL_SAVES
+    elseif host_cap and host_cap >= Config.MAX_MANUAL_SAVES then
+        at_cap = true
+        source = "host_marker"
+        count = host_cap
+    end
+
+    local label
+    if count and source then
+        label = string.format("%d/%d (%s)", count, Config.MAX_MANUAL_SAVES, source)
+    elseif at_cap and source then
+        label = string.format("100/100 (%s)", source)
+    else
+        label = string.format(
+            "count unknown — run oow.set_cap if pause menu shows 100/100 (disk cache %d)",
+            disk
+        )
+    end
+
+    return at_cap, {
+        game = count,
+        disk = disk,
+        label = label,
+        verified = source ~= nil,
+        cap_source = source,
+    }
 end
 
 function SavesFs.cap_status()
@@ -218,6 +400,46 @@ function SavesFs.oldest_manual_save()
         return nil
     end
     return list[1]
+end
+
+-- Lightweight disk scan for post-save verification (gameplay only; avoid pause menu).
+function SavesFs.scan_disk_guid_names()
+    local root = Config.SAVE_ROOT
+    if not root or root == "" then
+        return nil
+    end
+    local cmd = string.format('cmd /c dir /b /ad "%s" 2>nul', root)
+    local handle = io.popen(cmd, "r")
+    if not handle then
+        return nil
+    end
+    local names = {}
+    for line in handle:lines() do
+        local trimmed = line:match("^%s*(.-)%s*$")
+        if is_guid_folder_name(trimmed) then
+            names[#names + 1] = trimmed:upper()
+        end
+    end
+    pcall(function()
+        handle:close()
+    end)
+    if #names == 0 then
+        return nil
+    end
+    return names
+end
+
+function SavesFs.find_new_disk_folder(before_names)
+    local names = SavesFs.scan_disk_guid_names()
+    if not names then
+        return nil, "disk scan unavailable"
+    end
+    for _, name in ipairs(names) do
+        if not before_names or not before_names[name] then
+            return name, nil
+        end
+    end
+    return nil, "no new save folder on disk"
 end
 
 function SavesFs.snapshot(force_refresh)

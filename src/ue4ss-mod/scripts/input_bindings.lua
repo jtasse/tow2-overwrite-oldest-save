@@ -1,35 +1,39 @@
 local Config = require("config")
 local Log = require("log")
 local QuickSave = require("quick_save")
+local XInputGamepad = nil
+local GamepadBridge = nil
+
+local function get_xinput()
+    if not XInputGamepad then
+        XInputGamepad = require("xinput_gamepad")
+    end
+    return XInputGamepad
+end
+
+local function get_bridge()
+    if not GamepadBridge then
+        GamepadBridge = require("gamepad_bridge")
+    end
+    return GamepadBridge
+end
 
 local InputBindings = {}
 
 local last_trigger_at = 0
 local DEBOUNCE_MS = 800
+local bindings_started = false
+local arm_scheduled = false
+local gamepad_poll_active = false
+local gamepad_poll_paused_until = 0
 
 local GAMEPAD_KEY_CANDIDATES = {
-    left = {
-        "Gamepad_LeftShoulder",
-        "Gamepad_LeftShoulder_Button",
-        "LeftShoulder",
-    },
-    right = {
-        "Gamepad_RightShoulder",
-        "Gamepad_RightShoulder_Button",
-        "RightShoulder",
-    },
-    action = {
-        "Gamepad_FaceButton_Bottom",
-        "Gamepad_FaceButton_A",
-        "FaceButton_Bottom",
-    },
+    hold1 = { "Gamepad_LeftTrigger", "LeftTrigger" },
+    hold2 = { "Gamepad_LeftShoulder", "Gamepad_LeftShoulder_Button", "LeftShoulder" },
+    action = { "Gamepad_FaceButton_Left", "Gamepad_FaceButton_X", "FaceButton_Left" },
 }
 
-local resolved_keys = {
-    left = nil,
-    right = nil,
-    action = nil,
-}
+local resolved_keys = { hold1 = nil, hold2 = nil, action = nil }
 
 local function get_player_controller()
     local pc = FindFirstOf("PlayerController")
@@ -84,41 +88,32 @@ local function was_key_pressed(pc, key_name)
     return ok and ret == true
 end
 
-local function resolve_gamepad_keys(pc)
-    if resolved_keys.left and resolved_keys.right and resolved_keys.action then
-        return true
+local function resolve_ue_key(name)
+    if Key and Key[name] then
+        return Key[name]
     end
-    for _, name in ipairs(GAMEPAD_KEY_CANDIDATES.left) do
-        if is_key_down(pc, name) or was_key_pressed(pc, name) then
-            resolved_keys.left = name
-            Log.info("Gamepad left key resolved: " .. name)
-            break
+    return make_key(name)
+end
+
+local function resolve_keyboard_binding()
+    local kb = Config.INPUT.KEYBOARD
+    if kb.key and kb.modifiers then
+        return kb.key, kb.modifiers
+    end
+    if not Key or not ModifierKey then
+        return nil, nil
+    end
+    local key = Key[kb.key_name or "O"]
+    local mods = {}
+    for _, mod_name in ipairs(kb.modifier_names or {}) do
+        if ModifierKey[mod_name] then
+            mods[#mods + 1] = ModifierKey[mod_name]
         end
     end
-    for _, name in ipairs(GAMEPAD_KEY_CANDIDATES.right) do
-        if is_key_down(pc, name) or was_key_pressed(pc, name) then
-            resolved_keys.right = name
-            Log.info("Gamepad right key resolved: " .. name)
-            break
-        end
+    if not key or #mods == 0 then
+        return nil, nil
     end
-    for _, name in ipairs(GAMEPAD_KEY_CANDIDATES.action) do
-        if is_key_down(pc, name) or was_key_pressed(pc, name) then
-            resolved_keys.action = name
-            Log.info("Gamepad action key resolved: " .. name)
-            break
-        end
-    end
-    if not resolved_keys.left then
-        resolved_keys.left = Config.INPUT.GAMEPAD.left[1]
-    end
-    if not resolved_keys.right then
-        resolved_keys.right = Config.INPUT.GAMEPAD.right[1]
-    end
-    if not resolved_keys.action then
-        resolved_keys.action = Config.INPUT.GAMEPAD.action[1]
-    end
-    return true
+    return key, mods
 end
 
 local function should_trigger()
@@ -139,68 +134,69 @@ function InputBindings.trigger_quick_save()
     end)
 end
 
-local function check_gamepad_combo()
-    if not Config.INPUT.GAMEPAD_ENABLED then
-        return
+function InputBindings.pause_gamepad_poll(duration_ms)
+    gamepad_poll_paused_until = os.clock() * 1000 + (duration_ms or Config.INPUT.CONSOLE_PAUSE_MS or 45000)
+    if XInputGamepad and XInputGamepad.pause then
+        XInputGamepad.pause(duration_ms)
     end
-
-    local pc = get_player_controller()
-    if not pc then
-        return
+    if GamepadBridge and GamepadBridge.pause then
+        GamepadBridge.pause(duration_ms)
     end
+end
 
-    resolve_gamepad_keys(pc)
-
-    local left_name = resolved_keys.left
-    local right_name = resolved_keys.right
-    local action_name = resolved_keys.action
-    if not left_name or not right_name or not action_name then
-        return
+local function install_gamepad_bridge()
+    if not Config.INPUT.GAMEPAD_ENABLED or Config.INPUT.GAMEPAD_METHOD ~= "bridge" then
+        return false
     end
-
-    if not (is_key_down(pc, left_name) and is_key_down(pc, right_name)) then
-        return
+    local ok, mod_or_err = pcall(get_bridge)
+    if not ok then
+        Log.warn("Gamepad bridge module failed: " .. tostring(mod_or_err))
+        return false
     end
-
-    if was_key_pressed(pc, action_name) then
-        Log.info("Gamepad combo: " .. left_name .. " + " .. right_name .. " + tap " .. action_name)
+    return mod_or_err.start(function()
         InputBindings.trigger_quick_save()
-    end
-end
-
-local function poll_gamepad_loop()
-    ExecuteInGameThread(function()
-        pcall(check_gamepad_combo)
     end)
-    ExecuteWithDelay(Config.INPUT.GAMEPAD_POLL_MS, poll_gamepad_loop)
 end
 
-local function resolve_keyboard_binding()
-    local kb = Config.INPUT.KEYBOARD
-    if kb.key and kb.modifiers then
-        return kb.key, kb.modifiers
+local function install_gamepad_xinput()
+    if not Config.INPUT.GAMEPAD_ENABLED or Config.INPUT.GAMEPAD_METHOD ~= "xinput" then
+        return false
     end
-    if not Key or not ModifierKey then
-        return nil, nil
+    local ok, mod_or_err = pcall(get_xinput)
+    if not ok then
+        Log.warn("XInput module failed: " .. tostring(mod_or_err))
+        return false
     end
-    local key = Key[kb.key_name or "O"]
-    local mods = {}
-    for _, name in ipairs(kb.modifier_names or {}) do
-        if ModifierKey[name] then
-            mods[#mods + 1] = ModifierKey[name]
+    return mod_or_err.start(function()
+        InputBindings.trigger_quick_save()
+    end)
+end
+
+local function install_console_pause_binds()
+    if not Key then
+        return
+    end
+    for _, name in ipairs({ "Tilde", "Backslash", "Quote" }) do
+        local key = Key[name]
+        if key then
+            pcall(function()
+                RegisterKeyBind(key, {}, function()
+                    InputBindings.pause_gamepad_poll()
+                    Log.info("Gamepad poll paused (~ console)")
+                end)
+            end)
         end
     end
-    if not key or #mods == 0 then
-        return nil, nil
-    end
-    return key, mods
 end
 
-function InputBindings.install_keyboard()
+local function install_keyboard_register()
+    if not Config.INPUT.KEYBOARD_ENABLED then
+        return false
+    end
     local key, mods = resolve_keyboard_binding()
     if not key then
-        Log.warn("Keyboard bind skipped (Key API unavailable) — use oow.save in console")
-        return
+        Log.warn("Keyboard bind skipped (Key API unavailable) — use oow.s")
+        return false
     end
     local ok, err = pcall(function()
         RegisterKeyBind(key, mods, function()
@@ -209,71 +205,273 @@ function InputBindings.install_keyboard()
         end)
     end)
     if ok then
-        Log.info("Keyboard: Ctrl+Shift+O = quick save")
-    else
-        Log.warn("RegisterKeyBind failed: " .. tostring(err))
+        Log.info("Keyboard: Ctrl+Shift+O = quick save (RegisterKeyBind)")
+        install_console_pause_binds()
+        return true
     end
+    Log.warn("RegisterKeyBind keyboard failed: " .. tostring(err))
+    return false
 end
 
-function InputBindings.install_gamepad()
+local function install_gamepad_register()
     if not Config.INPUT.GAMEPAD_ENABLED then
-        return
+        return false
+    end
+    if Config.INPUT.GAMEPAD_METHOD ~= "register" then
+        return false
+    end
+
+    local candidates = {}
+    if Config.INPUT.GAMEPAD_REGISTER_KEY then
+        candidates[#candidates + 1] = Config.INPUT.GAMEPAD_REGISTER_KEY
+    end
+    for _, name in ipairs(Config.INPUT.GAMEPAD_REGISTER_FALLBACK_KEYS or {}) do
+        candidates[#candidates + 1] = name
+    end
+
+    for _, name in ipairs(candidates) do
+        local key = resolve_ue_key(name)
+        if key then
+            local bound = false
+            local ok, err = pcall(function()
+                RegisterKeyBind(key, {}, function()
+                    Log.info("Gamepad: " .. name)
+                    InputBindings.trigger_quick_save()
+                end)
+                bound = true
+            end)
+            if ok and bound then
+                Log.info("Gamepad: " .. name .. " = quick save (RegisterKeyBind)")
+                return true
+            end
+            Log.warn("RegisterKeyBind gamepad " .. name .. " failed: " .. tostring(err))
+        end
+    end
+    return false
+end
+
+local function resolve_gamepad_keys(pc)
+    if resolved_keys.hold1 and resolved_keys.hold2 and resolved_keys.action then
+        return true
+    end
+    for _, name in ipairs(GAMEPAD_KEY_CANDIDATES.hold1) do
+        if is_key_down(pc, name) or was_key_pressed(pc, name) then
+            resolved_keys.hold1 = name
+            break
+        end
+    end
+    for _, name in ipairs(GAMEPAD_KEY_CANDIDATES.hold2) do
+        if is_key_down(pc, name) or was_key_pressed(pc, name) then
+            resolved_keys.hold2 = name
+            break
+        end
+    end
+    for _, name in ipairs(GAMEPAD_KEY_CANDIDATES.action) do
+        if is_key_down(pc, name) or was_key_pressed(pc, name) then
+            resolved_keys.action = name
+            break
+        end
     end
     local gp = Config.INPUT.GAMEPAD
-    resolved_keys.left = gp.left[1]
-    resolved_keys.right = gp.right[1]
-    resolved_keys.action = gp.action[1]
-    poll_gamepad_loop()
-    Log.info(string.format(
-        "Gamepad: hold %s + %s, tap %s (A) = quick save",
-        resolved_keys.left,
-        resolved_keys.right,
-        resolved_keys.action
-    ))
+    if not resolved_keys.hold1 then
+        resolved_keys.hold1 = gp.hold1[1]
+    end
+    if not resolved_keys.hold2 then
+        resolved_keys.hold2 = gp.hold2[1]
+    end
+    if not resolved_keys.action then
+        resolved_keys.action = gp.action[1]
+    end
+    return true
 end
 
-local bindings_started = false
-
--- Defer until in-game: early EngineTick / ExecuteInGameThread polling crashed TOW2 at startup.
-function InputBindings.start_after_load()
-    if bindings_started then
+local function check_gamepad_combo()
+    local pc = get_player_controller()
+    if not pc then
         return
     end
-    bindings_started = true
-    InputBindings.install_keyboard()
-    InputBindings.install_gamepad()
+    resolve_gamepad_keys(pc)
+    local h1, h2, act = resolved_keys.hold1, resolved_keys.hold2, resolved_keys.action
+    if not (h1 and h2 and act) then
+        return
+    end
+    if not (is_key_down(pc, h1) and is_key_down(pc, h2)) then
+        return
+    end
+    if was_key_pressed(pc, act) then
+        Log.info("Gamepad combo: (hold " .. h1 .. " + " .. h2 .. ") + tap " .. act)
+        InputBindings.trigger_quick_save()
+    end
+end
+
+local function poll_gamepad_loop()
+    if not gamepad_poll_active then
+        return
+    end
+    if os.clock() * 1000 < gamepad_poll_paused_until then
+        ExecuteWithDelay(250, poll_gamepad_loop)
+        return
+    end
+    ExecuteInGameThread(function()
+        pcall(check_gamepad_combo)
+    end)
+    ExecuteWithDelay(Config.INPUT.GAMEPAD_POLL_MS, poll_gamepad_loop)
+end
+
+local function install_gamepad_poll()
+    if not Config.INPUT.GAMEPAD_ENABLED or Config.INPUT.GAMEPAD_METHOD ~= "poll" then
+        return false
+    end
+    local gp = Config.INPUT.GAMEPAD
+    resolved_keys.hold1 = gp.hold1[1]
+    resolved_keys.hold2 = gp.hold2[1]
+    resolved_keys.action = gp.action[1]
+    gamepad_poll_active = true
+    ExecuteWithDelay(Config.INPUT.GAMEPAD_POLL_DELAY_MS or 3000, function()
+        poll_gamepad_loop()
+        Log.info(string.format(
+            "Gamepad poll: (hold %s + %s) + tap %s (LT+LB+X)",
+            resolved_keys.hold1, resolved_keys.hold2, resolved_keys.action
+        ))
+    end)
+    return true
+end
+
+function InputBindings.start_keyboard()
+    if InputBindings._keyboard_started then
+        return false
+    end
+    InputBindings._keyboard_started = install_keyboard_register()
+    return InputBindings._keyboard_started
+end
+
+function InputBindings.start_gamepad()
+    if InputBindings._gamepad_started then
+        return false
+    end
+    if Config.INPUT.GAMEPAD_METHOD == "bridge" then
+        InputBindings._gamepad_started = install_gamepad_bridge()
+        if not InputBindings._gamepad_started then
+            InputBindings._gamepad_started = install_gamepad_xinput()
+        end
+        return InputBindings._gamepad_started
+    end
+    if Config.INPUT.GAMEPAD_METHOD == "xinput" then
+        InputBindings._gamepad_started = install_gamepad_xinput()
+        return InputBindings._gamepad_started
+    end
+    if Config.INPUT.GAMEPAD_METHOD == "external" then
+        Log.info("Gamepad: use external remap LT+LB+X -> Ctrl+Shift+O (in-mod poll crashes WinGDK)")
+        InputBindings._gamepad_started = true
+        return true
+    end
+    if Config.INPUT.GAMEPAD_METHOD == "poll" then
+        InputBindings._gamepad_started = install_gamepad_poll()
+        return InputBindings._gamepad_started
+    end
+    InputBindings._gamepad_started = install_gamepad_register()
+    return InputBindings._gamepad_started
+end
+
+function InputBindings.start_after_load(opts)
+    opts = opts or {}
+    local want_keyboard = opts.keyboard ~= false
+    local want_gamepad = opts.gamepad == true
+
+    if want_keyboard then
+        InputBindings.start_keyboard()
+    end
+    if want_gamepad and Config.INPUT.GAMEPAD_ENABLED then
+        local delay_ms = opts.gamepad_delay_ms or Config.INPUT.GAMEPAD_ARM_DELAY_MS or 3000
+        ExecuteWithDelay(delay_ms, function()
+            if Config.INPUT.GAMEPAD_METHOD == "bridge" or Config.INPUT.GAMEPAD_METHOD == "xinput" then
+                pcall(function()
+                    InputBindings.start_gamepad()
+                end)
+            else
+                ExecuteInGameThread(function()
+                    pcall(function()
+                        InputBindings.start_gamepad()
+                    end)
+                end)
+            end
+        end)
+    end
+
+    if want_keyboard or want_gamepad then
+        bindings_started = true
+    end
+end
+
+function InputBindings.schedule_arm(opts)
+    if bindings_started then
+        return true, "Hotkeys already active."
+    end
+    if arm_scheduled then
+        return true, "Hotkeys already scheduled."
+    end
+    if not Config.INPUT.HOTKEYS_ENABLED then
+        return false, "Hotkeys disabled in config."
+    end
+
+    arm_scheduled = true
+    local via = (opts and opts.via) or "scheduled"
+    local delay_ms = (opts and opts.delay_ms) or Config.INPUT.ARM_DELAY_MS or 2500
+    Log.info(string.format("Hotkeys scheduled in %.1fs (%s) — close console", delay_ms / 1000, via))
+
+    ExecuteWithDelay(delay_ms, function()
+        ExecuteInGameThread(function()
+            local ok, err = pcall(function()
+                local arm_opts = opts.arm or { keyboard = true, gamepad = false }
+                InputBindings.start_after_load(arm_opts)
+            end)
+            if ok then
+                Log.info("Hotkeys active (" .. via .. ")")
+            else
+                arm_scheduled = false
+                bindings_started = false
+                Log.warn("Hotkey install failed: " .. tostring(err))
+            end
+        end)
+    end)
+
+    return true, string.format("Hotkeys in ~%.0fs. Close console first.", delay_ms / 1000)
+end
+
+function InputBindings.schedule_arm_after_save()
+    if not Config.INPUT.AUTO_ARM_ON_SAVE or bindings_started then
+        return
+    end
+    InputBindings.schedule_arm({
+        via = "after_save",
+        delay_ms = Config.INPUT.ARM_DELAY_AFTER_SAVE_MS,
+        arm = { keyboard = true, gamepad = false },
+    })
+end
+
+function InputBindings.arm_gamepad_after_console()
+    if InputBindings._gamepad_started then
+        return true, "Gamepad already armed (XInput)."
+    end
+    InputBindings.pause_gamepad_poll(2000)
+    ExecuteWithDelay(2000, function()
+        pcall(function()
+            InputBindings.start_after_load({ keyboard = false, gamepad = true })
+        end)
+    end)
+    return true, "Close console. Gamepad (LT+LB+X / hold Back) in ~2s."
 end
 
 function InputBindings.discover_gamepad()
-    local lines = { "=== Gamepad input discovery (press buttons now) ===" }
-    local pc = get_player_controller()
-    if not pc then
-        return false, "No PlayerController — load a save first."
+    local cfg = Config.INPUT.XINPUT or {}
+    local lines = {
+        "Gamepad via XInput (same quick save as Ctrl+Shift+O)",
+        "mode=" .. tostring(cfg.mode or "chord"),
+        "LT+LB+X chord; hold Back " .. tostring(cfg.hold_back_ms or 700) .. "ms",
+    }
+    for _, line in ipairs(lines) do
+        Log.info(line)
     end
-
-    local probe = {}
-    for _, group in pairs(GAMEPAD_KEY_CANDIDATES) do
-        for _, name in ipairs(group) do
-            probe[#probe + 1] = name
-        end
-    end
-    table.insert(probe, "Gamepad_FaceButton_Bottom")
-    table.insert(probe, "Gamepad_FaceButton_Right")
-    table.insert(probe, "Gamepad_Special_Left")
-    table.insert(probe, "Gamepad_Special_Right")
-    table.insert(probe, "Gamepad_LeftTrigger")
-    table.insert(probe, "Gamepad_RightTrigger")
-
-    for _, name in ipairs(probe) do
-        if is_key_down(pc, name) or was_key_pressed(pc, name) then
-            local line = "ACTIVE: " .. name
-            lines[#lines + 1] = line
-            Log.info(line)
-        end
-    end
-
-    lines[#lines + 1] = "=== end gamepad discovery ==="
-    Log.info(lines[#lines])
     return true, table.concat(lines, " | ")
 end
 

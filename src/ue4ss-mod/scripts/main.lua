@@ -16,34 +16,132 @@ SaveManager.install_param_logger()
 Menu.install_hooks()
 
 local game_ready = false
-local activation_scheduled = false
+local auto_arm_pending = false
 
-local function try_activate_after_load()
-    if game_ready then
-        return true
-    end
-
-    local mgr = SaveManager.get()
-    if not mgr then
+local function is_valid(obj)
+    if not obj then
         return false
     end
+    local ok, valid = pcall(function()
+        return obj:IsValid()
+    end)
+    return ok and valid
+end
 
-    game_ready = true
-    Log.info("SaveGameManager ready")
-    InputBindings.start_after_load()
-    Feedback.show_startup_banner()
+local function pawn_full_name(pawn)
+    local ok, name = pcall(function()
+        return pawn:GetFullName()
+    end)
+    return ok and name or ""
+end
+
+-- Reject menu/default pawns; FindAllOf("Pawn") was activating on the black screen.
+local function is_playable_pawn(pawn)
+    if not is_valid(pawn) then
+        return false
+    end
+    local name = string.lower(pawn_full_name(pawn))
+    if name:find("default__", 1, true) then
+        return false
+    end
+    if name:find("mainmenu", 1, true) or name:find("titlemenu", 1, true) then
+        return false
+    end
     return true
 end
 
-local hook_pre, hook_post
-hook_pre, hook_post = RegisterHook("/Script/Engine.PlayerController:ClientRestart", function()
-    if game_ready or activation_scheduled then
+local function pawn_from_pc(pc)
+    for _, accessor in ipairs({ "GetPawn", "Pawn", "GetCharacter", "Character" }) do
+        local ok, val = pcall(function()
+            local member = pc[accessor]
+            if type(member) == "function" then
+                return member(pc)
+            end
+            return member
+        end)
+        if ok and is_playable_pawn(val) then
+            return val
+        end
+    end
+    local ok, ack = pcall(function()
+        return pc.AcknowledgedPawn
+    end)
+    if ok and is_playable_pawn(ack) then
+        return ack
+    end
+    return nil
+end
+
+local function has_playable_character()
+    local pc = FindFirstOf("PlayerController")
+    if not is_valid(pc) then
+        return false
+    end
+    return pawn_from_pc(pc) ~= nil
+end
+
+local function try_schedule_hotkeys(opts)
+    if game_ready or auto_arm_pending then
+        return true, "Hotkeys already active or scheduled."
+    end
+    if not SaveManager.get() then
+        return false, "SaveGameManager not ready — load a save first."
+    end
+    local via = (opts and opts.via) or "manual"
+    auto_arm_pending = true
+    game_ready = true
+    local delay_ms = (opts and opts.delay_ms) or Config.INPUT.ARM_DELAY_MS or 1500
+    local ok, msg = InputBindings.schedule_arm({
+        via = via,
+        delay_ms = delay_ms,
+        arm = opts and opts.arm,
+    })
+    if ok then
+        ExecuteWithDelay(delay_ms + 500, function()
+            auto_arm_pending = false
+            Feedback.show_startup_banner()
+        end)
+    else
+        auto_arm_pending = false
+        game_ready = false
+    end
+    return ok, msg
+end
+
+local function try_auto_arm_hotkeys(via)
+    if not Config.INPUT.AUTO_ARM_BINDINGS then
         return
     end
-    activation_scheduled = true
-    ExecuteWithDelay(5000, function()
+    if game_ready or auto_arm_pending then
+        return
+    end
+    if not SaveManager.get() then
+        Log.info("Hotkeys waiting — SaveGameManager not ready")
+        return
+    end
+    if not has_playable_character() then
+        Log.info("Hotkeys waiting — character not ready")
+        return
+    end
+    Log.info("In-game — scheduling hotkeys (" .. via .. ")")
+    local arm_gamepad = Config.INPUT.AUTO_ARM_GAMEPAD_ON_LOAD
+        and Config.INPUT.GAMEPAD_ENABLED
+        and (Config.INPUT.GAMEPAD_METHOD == "bridge" or Config.INPUT.GAMEPAD_METHOD == "xinput")
+    try_schedule_hotkeys({
+        via = via,
+        delay_ms = Config.INPUT.ARM_DELAY_MS,
+        arm = { keyboard = true, gamepad = arm_gamepad },
+    })
+end
+
+RegisterHook("/Script/Engine.PlayerController:ClientRestart", function()
+    if game_ready or auto_arm_pending then
+        return
+    end
+    local delay_ms = Config.INPUT.CLIENT_RESTART_DELAY_MS or 8000
+    ExecuteWithDelay(delay_ms, function()
         ExecuteInGameThread(function()
-            try_activate_after_load()
+            try_auto_arm_hotkeys("ClientRestart")
         end)
     end)
 end)
@@ -54,21 +152,24 @@ local function reply(Ar, ok, msg)
     return true
 end
 
-local function run_command(FullCommand, Parameters, Ar, run_fn)
-    try_activate_after_load()
+local function run_command(FullCommand, Parameters, Ar, run_fn, name)
+    InputBindings.pause_gamepad_poll()
     local ok, msg = run_fn(FullCommand, Parameters, Ar)
     return reply(Ar, ok, msg)
 end
 
 local function register_oow_command(name, run_fn)
     RegisterConsoleCommandGlobalHandler(name, function(FullCommand, Parameters, Ar)
-        return run_command(FullCommand, Parameters, Ar, run_fn)
+        return run_command(FullCommand, Parameters, Ar, run_fn, name)
     end)
 end
 
-register_oow_command("oow.save", function()
+local function cmd_quicksave()
     return QuickSave.run()
-end)
+end
+
+register_oow_command("oow.save", cmd_quicksave)
+register_oow_command("oow.s", cmd_quicksave)
 
 register_oow_command("oow.overwrite", function()
     return QuickSave.run()
@@ -84,12 +185,28 @@ register_oow_command("oow.reload_cache", function()
     return true, string.format("Cache: %d saves (delete+save when >= %d)", n, Config.MAX_MANUAL_SAVES)
 end)
 
+register_oow_command("oow.arm_bindings", function()
+    local ok, msg = try_schedule_hotkeys({ via = "oow.arm_bindings", delay_ms = 3000 })
+    return ok, msg or "Hotkeys scheduled."
+end)
+
+register_oow_command("oow.arm_gamepad", function()
+    return InputBindings.arm_gamepad_after_console()
+end)
+
+register_oow_command("oow.set_cap", function()
+    return SavesFs.write_host_cap_marker(Config.MAX_MANUAL_SAVES)
+end)
+
+register_oow_command("oow.clear_cap", function()
+    return SavesFs.clear_host_cap_marker()
+end)
+
 register_oow_command("oow.help", function()
     return true, table.concat({
-        "Ctrl+Shift+O or hold LB+RB and tap A = quick save",
-        "oow.save - same as above",
-        "oow.discover_gamepad - log which buttons the game sees",
-        "oow.reload_cache - after refresh-save-cache.ps1 on host",
+        "Ctrl+Shift+O ~10s after load | LT+LB+X (start-gamepad-bridge.ps1)",
+        "oow.s = quick save | oow.set_cap when pause shows 100/100 | oow.clear_cap after deleting a save",
+        "oow.save_health = integrity check | oow.reload_cache after refresh-save-cache.ps1",
     }, " | ")
 end)
 
@@ -140,4 +257,4 @@ register_oow_command("oow.inject_menu", function()
     return Menu.try_inject(true)
 end)
 
-Log.info("Commands: oow.save | Ctrl+Shift+O | LB+RB+A | oow.discover_gamepad")
+Log.info("Ctrl+Shift+O auto-arms after load | oow.s | oow.help")

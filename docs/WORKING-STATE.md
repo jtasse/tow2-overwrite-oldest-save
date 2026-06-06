@@ -49,11 +49,11 @@ Only `OverwriteOldestSave : 1`. All stock UE4SS mods `0`. No `enabled.txt` in th
 
 | Setting | Value | Why |
 |---------|-------|-----|
-| `GAMEPAD_ENABLED` | `false` | Gamepad poll froze WinGDK on startup; keyboard works |
+| `GAMEPAD_ENABLED` | `true` | Hold **LT + LB**, tap **X** (not LB+RB/A) |
 | Input bindings | Deferred until `SaveGameManager` ready | Early `EngineTick` / poll crashed at launch |
 | `AUTO_INJECT` | `false` | Pause-menu inject unstable |
 
-**Controls that work:** **Ctrl+Shift+O**, console **`oow.save`** (needs Console Enabler `.pak` for `~`).
+**Controls that work:** **Ctrl+Shift+O**, **LT+LB+X** (in-game or pause), console **`oow.save`** (needs Console Enabler `.pak` for `~`).
 
 ## Local mod files (host)
 

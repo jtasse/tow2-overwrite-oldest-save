@@ -4,8 +4,8 @@
 
 **Quick save** from gameplay:
 
-- **Below 100/100:** `SaveGameManager.Quicksave` via `ProcessConsoleExec`
-- **At 100/100:** `DeleteGame <oldest GUID>` then `Quicksave`
+- **Below 100/100:** `SaveGameManager.SaveGame` via `ProcessConsoleExec` (manual slot — pause menu count increases)
+- **At 100/100:** `DeleteGame <oldest GUID>` then `Quicksave` (fills freed slot)
 - Oldest GUID from `%LOCALAPPDATA%\OverwriteOldestSave-save-cache.json` (built by `scripts/refresh-save-cache.ps1`)
 
 Pause-menu **Save Game** row injection is **disabled** (`Config.MENU.AUTO_INJECT = false`) on stock UE4SS 3.0.1 for this game.
@@ -53,23 +53,22 @@ Copy the block in `UE4SS.log` between:
 
 Useful lines: `SaveGameManager: ...`, property names, `manual_folders=100`, `oldest=...`.
 
-### `oow.discover_gamepad` — tuning LB+RB+A
+### `oow.discover_gamepad` — tuning LT+LB+X
 
 Default combo (see `config.lua` → `Config.INPUT.GAMEPAD`):
 
-- Hold **LB** (`Gamepad_LeftShoulder`)
-- Hold **RB** (`Gamepad_RightShoulder`)
-- Tap **A** (`Gamepad_FaceButton_Bottom`)
+- **Hold** LT (`Gamepad_LeftTrigger`) **and** LB (`Gamepad_LeftShoulder`) **together**
+- **Tap** X (`Gamepad_FaceButton_Left`) while both are held
 
-If buttons do not fire, run discovery while pressing each button and update `left` / `right` / `action` name lists in config.
+Works in-game or on the pause menu. If buttons do not fire, run discovery while pressing each button and update `hold1` / `hold2` / `action` name lists in config.
 
 ## 3. SaveGameManager APIs (confirmed via console gist / logs)
 
 | Function | Use in mod |
 |----------|------------|
 | `DeleteGame <GUID>` | Remove oldest slot at cap (`ProcessConsoleExec`) |
-| `Quicksave` | Primary save after delete (or alone below cap) |
-| `SaveGame` | **Not used** — tended to create autosaves, not manual list entries |
+| `SaveGame` | **Below cap** — adds a manual save (pause menu count increases) |
+| `Quicksave` | **At cap only** — after `DeleteGame`, fills the freed manual slot |
 | `Autosave` | Not used |
 
 Reference: [TOW2 console command gist](https://gist.github.com/Micrologist/9c62b8f050bf25efbcf207382b1e7574) (`SaveGameManager::Quicksave`, etc.).
@@ -100,7 +99,7 @@ To experiment with menu inject:
 - [x] Quick save at &lt; 100 without blocking
 - [x] At 100, delete oldest (engine) + Quicksave
 - [x] Keyboard: Ctrl+Shift+O
-- [x] Gamepad: LB + RB hold, tap A
+- [x] Gamepad: LT + LB hold, tap X (in-game or pause)
 - [x] External cache + orphan cleanup via `refresh-save-cache.ps1`
 - [ ] Pause-menu row stable on stock UE4SS 3.0.1 (deferred)
-- [ ] New manual save always appears at top of Save Game list (UI may lag; Quicksave vs manual save distinction)
+- [x] Below cap uses `SaveGame` so pause menu count increases (not `Quicksave`)

@@ -8,12 +8,12 @@ TOW2 **quick save** mod (repo name: overwrite-oldest-save).
 |------|--------|
 | Game | Xbox PC / Game Pass **1.256.9237** |
 | Branch | **`develop`** @ 8509bce — not `main` |
-| Working flow | Ctrl+Shift+O / `oow.save` → below cap: `Quicksave`; at cap: `DeleteGame` oldest + `Quicksave` |
+| Working flow | Ctrl+Shift+O / LT+LB+X / `oow.save` → below cap: `Quicksave`; at cap: `DeleteGame` oldest + `Quicksave` |
 | Proof | Log + marker: `QUICK SAVE OK`, `DeleteGame OK`, `SUCCESS: Quick save done` |
 | UE4SS | experimental-latest, **only** `OverwriteOldestSave : 1` |
 | OW2 ini | **6852** B settings + **18293** B VTableLayout (`zCustomGameConfigs.zip`) |
 | `override.txt` | **Must be absent** |
-| Gamepad poll | **Off** by default (`GAMEPAD_ENABLED = false`) — WinGDK freeze |
+| Gamepad | **(hold LT + LB) + tap X** — in-game or pause |
 | Input hooks | **Deferred** until `SaveGameManager` ready (`start_after_load`) |
 | Menu inject | **Off** (`AUTO_INJECT = false`) |
 
@@ -57,6 +57,6 @@ Full fingerprint: **[WORKING-STATE.md](./WORKING-STATE.md)**
 
 ## Open improvements
 
-- Re-enable gamepad poll safely on all WinGDK builds
+- Confirm LT+LB+X on pause menu on all controller layouts
 - Configurable overwrite-at-cap on/off, binding remapping in-game
 - Stable pause-menu row calling same `QuickSave.run()`

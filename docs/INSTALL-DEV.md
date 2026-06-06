@@ -47,8 +47,8 @@ WinGDK is usually `C:\XboxGames\The Outer Worlds 2\Content\Arkansas\Binaries\Win
 
 1. Restart game after deploy.
 2. Wait ~30s in-game; run `.\scripts\mod-status.ps1` on host.
-3. **Ctrl+Shift+O** or **`oow.save`**.
+3. **Ctrl+Shift+O**, **LT+LB+X**, or **`oow.save`**.
 4. At 100/100: log should show `DeleteGame OK` then `Quicksave`.
 5. Host: `.\scripts\refresh-save-cache.ps1`.
 
-Bindings: `src/ue4ss-mod/scripts/config.lua` → `Config.INPUT` (gamepad off by default).
+Bindings: `src/ue4ss-mod/scripts/config.lua` → `Config.INPUT` (gamepad: LT+LB+X).

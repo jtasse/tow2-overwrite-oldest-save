@@ -200,7 +200,7 @@ function Menu.install_hooks()
             end)
         end)
     else
-        Log.info("UI auto-inject OFF — Ctrl+Shift+O = quick save (anywhere)")
+        Log.info("UI auto-inject OFF — use oow.save in console")
     end
 end
 

@@ -18,5 +18,6 @@ if ($needsCore) {
 & (Join-Path $PSScriptRoot 'enable-mod.ps1')
 
 Write-Host ''
+Write-Host 'Controller: .\scripts\start-gamepad-bridge.ps1 (once per session, for LT+LB+X)' -ForegroundColor Cyan
 Write-Host 'Next: fully quit + launch game, load a save, wait ~30s.' -ForegroundColor Cyan
 Write-Host 'Verify: .\scripts\mod-status.ps1' -ForegroundColor Cyan

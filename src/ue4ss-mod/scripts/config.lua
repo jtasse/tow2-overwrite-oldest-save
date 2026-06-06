@@ -1,12 +1,21 @@
 local Config = {}
 
-Config.MOD_VERSION = "0.6.2-dev"
+Config.MOD_VERSION = "0.6.8-dev"
+
+-- Below cap: new manual slot via SaveGame. At cap after delete: Quicksave fills the freed manual slot (validated on TOW2).
+Config.USE_MANUAL_SAVE_ONLY = true
+Config.CAP_SAVE_USE_QUICKSAVE = true
+Config.ALLOW_QUICKSAVE_FALLBACK = false
+
+Config.PREFER_UFUNCTION_CALLS = true
+Config.ALLOW_MGR_CONSOLE_EXEC = true
+Config.ALLOW_PLAYER_CONTROLLER_CONSOLE = true
 
 -- PrintString on-screen feedback crashed TOW2 right after DeleteGame; use log + marker files.
 Config.USE_ON_SCREEN_FEEDBACK = false
 
--- Delay (ms) after DeleteGame before Quicksave.
-Config.POST_DELETE_DELAY_MS = 1500
+-- Delay (ms) after DeleteGame before SaveGame at cap.
+Config.POST_DELETE_DELAY_MS = 400
 
 -- Keyboard + gamepad quick save bindings (Key.* resolved at install, not here).
 Config.INPUT = {
@@ -14,17 +23,41 @@ Config.INPUT = {
         key_name = "O",
         modifier_names = { "CONTROL", "SHIFT" },
     },
-    -- Gamepad poll froze WinGDK on LEELOO2; set true + redeploy if LB+RB+A works on your PC.
-    GAMEPAD_ENABLED = false,
-    GAMEPAD_POLL_MS = 200,
-    -- Xbox: hold LB + RB, tap A (face button bottom).
+    HOTKEYS_ENABLED = true,
+    KEYBOARD_ENABLED = true,
+    -- Auto-arm Ctrl+Shift+O ~8s after loading a save (ClientRestart + pawn check).
+    AUTO_ARM_BINDINGS = true,
+    CLIENT_RESTART_DELAY_MS = 8000,
+    ARM_DELAY_MS = 1500,
+    -- Also arm after oow.s if auto-arm has not run yet.
+    AUTO_ARM_ON_SAVE = true,
+    ARM_DELAY_AFTER_SAVE_MS = 2500,
+    GAMEPAD_ENABLED = true,
+    -- XInput reads the controller outside UE (safe on WinGDK). UE "poll" crashes.
+    AUTO_ARM_GAMEPAD_ON_LOAD = true,
+    AUTO_ARM_GAMEPAD_ON_SAVE = false,
+    CONSOLE_PAUSE_MS = 45000,
+    GAMEPAD_ARM_DELAY_MS = 2000,
+    -- bridge = host PowerShell XInput file (WinGDK) | xinput = needs LuaJIT ffi (unavailable)
+    GAMEPAD_METHOD = "bridge",
+    BRIDGE = {
+        poll_ms = 50,
+    },
+    XINPUT = {
+        mode = "chord",
+        trigger_threshold = 30,
+        user_index = 0,
+        poll_ms = 50,
+    },
+    GAMEPAD_POLL_MS = 300,
+    GAMEPAD_POLL_DELAY_MS = 1000,
     GAMEPAD = {
-        left = { "Gamepad_LeftShoulder" },
-        right = { "Gamepad_RightShoulder" },
+        hold1 = { "Gamepad_LeftTrigger" },
+        hold2 = { "Gamepad_LeftShoulder" },
         action = {
-            "Gamepad_FaceButton_Bottom",
-            "Gamepad_FaceButton_A",
-            "FaceButton_Bottom",
+            "Gamepad_FaceButton_Left",
+            "Gamepad_FaceButton_X",
+            "FaceButton_Left",
         },
     },
 }
@@ -35,6 +68,12 @@ Config.LOG_PREFIX = "[OverwriteOldestSave] "
 
 -- Manual save cap (Steam / Xbox PC reports 100 manual slots).
 Config.MAX_MANUAL_SAVES = 100
+
+-- When engine save count is unreadable, set true if pause menu shows 100/100 (see oow.set_cap).
+Config.AT_CAP_OVERRIDE = false
+
+-- Host marker written by oow.set_cap or scripts\set-cap-marker.ps1
+Config.CAP_MARKER_FILE = (os.getenv("LOCALAPPDATA") or "") .. "\\OverwriteOldestSave-at-cap.json"
 
 -- Saved Games root; profile subfolders are scanned automatically.
 Config.SAVE_ROOT = os.getenv("USERPROFILE") .. "\\Saved Games\\TheOuterWorlds2"
@@ -53,12 +92,23 @@ Config.NON_MANUAL_MARKERS = {
 Config.SAVE_MANAGER_PROPERTY_CANDIDATES = {
     "ManualSaveCount",
     "NumManualSaves",
+    "NumSaveGames",
+    "SaveGameCount",
+    "CurrentManualSaveCount",
     "MaxManualSaves",
     "ManualSaveSlots",
     "SaveSlots",
     "Saves",
     "SaveGames",
     "CurrentSaveSlot",
+}
+
+-- Bool properties: if true, treat as at cap (100/100).
+Config.SAVE_MANAGER_CAP_BOOL_CANDIDATES = {
+    "bAtManualSaveCap",
+    "bIsAtSaveCap",
+    "bSaveListFull",
+    "bManualSaveCapReached",
 }
 
 -- Candidate SaveGameManager method names (filled in after in-game discovery).
