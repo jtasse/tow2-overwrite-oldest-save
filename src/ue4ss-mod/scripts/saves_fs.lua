@@ -136,6 +136,97 @@ local function cap_marker_path()
     return Config.CAP_MARKER_FILE
 end
 
+local function save_count_path()
+    return Config.SAVE_COUNT_FILE
+end
+
+local function parse_save_count_json(text)
+    if not text or text == "" then
+        return nil
+    end
+    local count = tonumber(text:match('"count"%s*:%s*(%d+)'))
+    if not count or count < 0 then
+        return nil
+    end
+    local source = text:match('"source"%s*:%s*"([^"]+)"')
+    local updated_at = text:match('"updatedAt"%s*:%s*"([^"]+)"')
+    return {
+        count = count,
+        source = source,
+        updatedAt = updated_at,
+    }
+end
+
+function SavesFs.read_persisted_save_state()
+    local path = save_count_path()
+    if path and path ~= "" then
+        local file = io.open(path, "r")
+        if file then
+            local text = file:read("*a")
+            file:close()
+            local state = parse_save_count_json(text)
+            if state then
+                return state
+            end
+        end
+    end
+
+    return nil
+end
+
+function SavesFs.read_persisted_save_count()
+    local state = SavesFs.read_persisted_save_state()
+    return state and state.count or nil
+end
+
+function SavesFs.write_persisted_save_count(count, source)
+    local path = save_count_path()
+    if not path or path == "" then
+        return false, "LOCALAPPDATA unavailable"
+    end
+    local n = tonumber(count)
+    if not n or n < 0 then
+        return false, "invalid count"
+    end
+    if n > Config.MAX_MANUAL_SAVES then
+        n = Config.MAX_MANUAL_SAVES
+    end
+
+    local payload = string.format(
+        '{"count":%d,"source":"%s","updatedAt":"%s"}',
+        n,
+        tostring(source or "unknown"),
+        os.date("%Y-%m-%dT%H:%M:%SZ")
+    )
+    local file = io.open(path, "w")
+    if not file then
+        return false, "could not write save count"
+    end
+    file:write(payload)
+    file:close()
+
+    local cap_path = cap_marker_path()
+    if n >= Config.MAX_MANUAL_SAVES then
+        if cap_path and cap_path ~= "" then
+            local cap_payload = string.format(
+                '{"atCap":true,"count":%d,"setAt":"%s","source":"in-game"}',
+                n,
+                os.date("%Y-%m-%dT%H:%M:%SZ")
+            )
+            local cap_file = io.open(cap_path, "w")
+            if cap_file then
+                cap_file:write(cap_payload)
+                cap_file:close()
+            end
+        end
+    elseif cap_path and cap_path ~= "" then
+        os.remove(cap_path)
+    end
+
+    Log.info(string.format("Save count persisted: %d/%d (%s)", n, Config.MAX_MANUAL_SAVES, tostring(source)))
+    return true, string.format("Save count %d/%d (%s).", n, Config.MAX_MANUAL_SAVES, tostring(source))
+end
+
 function SavesFs.read_host_cap_count()
     local path = cap_marker_path()
     if not path or path == "" then
@@ -159,24 +250,12 @@ function SavesFs.read_host_cap_count()
 end
 
 function SavesFs.write_host_cap_marker(count)
-    local path = cap_marker_path()
-    if not path or path == "" then
-        return false, "LOCALAPPDATA unavailable"
-    end
     local n = tonumber(count) or Config.MAX_MANUAL_SAVES
-    local payload = string.format(
-        '{"atCap":true,"count":%d,"setAt":"%s","source":"in-game"}',
-        n,
-        os.date("%Y-%m-%dT%H:%M:%SZ")
-    )
-    local file = io.open(path, "w")
-    if not file then
-        return false, "could not write cap marker"
+    local ok, msg = SavesFs.write_persisted_save_count(n, "set_cap")
+    if not ok then
+        return false, msg
     end
-    file:write(payload)
-    file:close()
-    Log.info(string.format("Cap marker written: %d/100 -> %s", n, path))
-    return true, string.format("Cap marker set (%d/100).", n)
+    return true, string.format("Cap marker set (%d/100). Open Save Game tab to resync after deleting saves.", n)
 end
 
 function SavesFs.clear_host_cap_marker()
@@ -186,7 +265,7 @@ function SavesFs.clear_host_cap_marker()
     end
     os.remove(path)
     Log.info("Cap marker cleared")
-    return true, "Cap marker cleared — oow.save will not delete until you set cap again."
+    return true, "Cap marker cleared — open pause Save Game tab to resync x/100, or run oow.sync_count there."
 end
 
 local function read_bool_property(obj, prop_name)
@@ -301,6 +380,7 @@ end
 function SavesFs.resolve_cap_state()
     local game = SavesFs.get_game_manual_count()
     local disk = SavesFs.manual_save_count()
+    local persisted = SavesFs.read_persisted_save_state()
     local host_cap = SavesFs.read_host_cap_count()
 
     local at_cap = false
@@ -310,6 +390,13 @@ function SavesFs.resolve_cap_state()
     if game and game >= Config.MAX_MANUAL_SAVES then
         at_cap = true
         source = "engine"
+    elseif game then
+        at_cap = false
+        source = "engine"
+    elseif persisted and persisted.count then
+        count = persisted.count
+        at_cap = count >= Config.MAX_MANUAL_SAVES
+        source = persisted.source or "persisted"
     elseif Config.AT_CAP_OVERRIDE then
         at_cap = true
         source = "config"
@@ -327,7 +414,7 @@ function SavesFs.resolve_cap_state()
         label = string.format("100/100 (%s)", source)
     else
         label = string.format(
-            "count unknown — run oow.set_cap if pause menu shows 100/100 (disk cache %d)",
+            "count unknown — open pause Save Game tab or oow.set_cap if menu shows 100/100 (disk cache %d)",
             disk
         )
     end
@@ -338,6 +425,7 @@ function SavesFs.resolve_cap_state()
         label = label,
         verified = source ~= nil,
         cap_source = source,
+        persisted = persisted,
     }
 end
 

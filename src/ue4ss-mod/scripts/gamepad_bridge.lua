@@ -6,13 +6,16 @@ local GamepadBridge = {}
 
 local poll_active = false
 local paused_until = 0
-local prev_x_down = false
+local prev_both_sticks = false
 local on_trigger = nil
+local bridge_retry_count = 0
+local MAX_BRIDGE_RETRIES = 72
 
 local BRIDGE_FILE = (os.getenv("LOCALAPPDATA") or "") .. "\\OverwriteOldestSave-gamepad.json"
 
-local BUTTON_LEFT_SHOULDER = 0x0100
-local BUTTON_X = 0x4000
+-- XInput: LEFT_THUMB = L3, RIGHT_THUMB = R3
+local BUTTON_LEFT_THUMB = 0x0040
+local BUTTON_RIGHT_THUMB = 0x0080
 
 local function band(a, b)
     local result = 0
@@ -73,12 +76,17 @@ function GamepadBridge.pause(duration_ms)
     paused_until = os.clock() * 1000 + (duration_ms or Config.INPUT.CONSOLE_PAUSE_MS or 45000)
 end
 
+local function chord_label()
+    return "LT+L3+R3"
+end
+
 local function check_chord(state, cfg)
     local threshold = cfg.trigger_threshold or 30
     local lt = state.lt >= threshold
-    local lb = band(state.buttons, BUTTON_LEFT_SHOULDER) ~= 0
-    local x_down = band(state.buttons, BUTTON_X) ~= 0
-    if lt and lb and x_down and not prev_x_down then
+    local l3 = band(state.buttons, BUTTON_LEFT_THUMB) ~= 0
+    local r3 = band(state.buttons, BUTTON_RIGHT_THUMB) ~= 0
+    local both = l3 and r3
+    if lt and both and not prev_both_sticks then
         return true
     end
     return false
@@ -87,19 +95,21 @@ end
 local function poll_once()
     local state = read_state()
     if not state then
-        prev_x_down = false
+        prev_both_sticks = false
         return
     end
 
-    local x_down = band(state.buttons, BUTTON_X) ~= 0
     local cfg = Config.INPUT.XINPUT or {}
+    local l3 = band(state.buttons, BUTTON_LEFT_THUMB) ~= 0
+    local r3 = band(state.buttons, BUTTON_RIGHT_THUMB) ~= 0
+    local both = l3 and r3
 
     if check_chord(state, cfg) and on_trigger then
-        Log.info("Gamepad bridge: LT+LB+X")
+        Log.info("Gamepad bridge: " .. chord_label())
         on_trigger()
     end
 
-    prev_x_down = x_down
+    prev_both_sticks = both
 end
 
 local function poll_loop()
@@ -113,20 +123,36 @@ local function poll_loop()
     ExecuteWithDelay(poll_ms, poll_loop)
 end
 
+local function schedule_bridge_retry(trigger_fn)
+    if bridge_retry_count >= MAX_BRIDGE_RETRIES then
+        return
+    end
+    bridge_retry_count = bridge_retry_count + 1
+    ExecuteWithDelay(5000, function()
+        if not poll_active then
+            GamepadBridge.start(trigger_fn)
+        end
+    end)
+end
+
 function GamepadBridge.start(trigger_fn)
     if poll_active then
         return true
     end
 
+    on_trigger = trigger_fn
     if not read_state() then
-        Log.warn("Gamepad bridge file missing — run scripts\\start-gamepad-bridge.ps1 on host")
+        if bridge_retry_count == 0 then
+            Log.warn("Gamepad bridge file missing — enable-mod installs autostart; or run scripts\\start-gamepad-bridge.ps1 (retries every 5s)")
+        end
+        schedule_bridge_retry(trigger_fn)
         return false
     end
 
-    on_trigger = trigger_fn
+    bridge_retry_count = 0
     poll_active = true
-    prev_x_down = false
-    Log.info("Gamepad bridge: hold LT + LB, tap X = quick save")
+    prev_both_sticks = false
+    Log.info("Gamepad bridge: hold LT + click L3 and R3 = quick save")
     poll_loop()
     return true
 end

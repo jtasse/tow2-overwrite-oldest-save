@@ -1,14 +1,15 @@
 local Config = {}
 
-Config.MOD_VERSION = "0.6.8-dev"
+Config.MOD_VERSION = "0.7.6-dev"
 
--- Below cap: new manual slot via SaveGame. At cap after delete: Quicksave fills the freed manual slot (validated on TOW2).
+-- Below cap: UFunction SaveGame (manual slot). Fallback: UFunction Quicksave (quicksave slot only).
 Config.USE_MANUAL_SAVE_ONLY = true
 Config.CAP_SAVE_USE_QUICKSAVE = true
-Config.ALLOW_QUICKSAVE_FALLBACK = false
+Config.ALLOW_QUICKSAVE_FALLBACK = true
 
 Config.PREFER_UFUNCTION_CALLS = true
-Config.ALLOW_MGR_CONSOLE_EXEC = true
+-- Console SaveGame returns true but does not save on TOW2; keep off for save paths (delete still has fallback).
+Config.ALLOW_MGR_CONSOLE_EXEC = false
 Config.ALLOW_PLAYER_CONTROLLER_CONSOLE = true
 
 -- PrintString on-screen feedback crashed TOW2 right after DeleteGame; use log + marker files.
@@ -53,12 +54,8 @@ Config.INPUT = {
     GAMEPAD_POLL_DELAY_MS = 1000,
     GAMEPAD = {
         hold1 = { "Gamepad_LeftTrigger" },
-        hold2 = { "Gamepad_LeftShoulder" },
-        action = {
-            "Gamepad_FaceButton_Left",
-            "Gamepad_FaceButton_X",
-            "FaceButton_Left",
-        },
+        hold2 = { "Gamepad_LeftThumbstick", "Gamepad_LeftThumb", "LeftThumb" },
+        action = { "Gamepad_RightThumbstick", "Gamepad_RightThumb", "RightThumb" },
     },
 }
 
@@ -74,6 +71,14 @@ Config.AT_CAP_OVERRIDE = false
 
 -- Host marker written by oow.set_cap or scripts\set-cap-marker.ps1
 Config.CAP_MARKER_FILE = (os.getenv("LOCALAPPDATA") or "") .. "\\OverwriteOldestSave-at-cap.json"
+
+-- Tracked x/100 when engine count is unreadable (pause UI scrape + successful mod saves).
+Config.SAVE_COUNT_FILE = (os.getenv("LOCALAPPDATA") or "") .. "\\OverwriteOldestSave-save-count.json"
+
+-- Manual only (oow.sync_count). Auto poll/NotifyOnNewObject freezes TOW2 Save Game menu.
+Config.PAUSE_UI_SYNC_ENABLED = true
+Config.PAUSE_UI_SYNC_AUTO = false
+Config.PAUSE_UI_SYNC_INTERVAL_MS = 2000
 
 -- Saved Games root; profile subfolders are scanned automatically.
 Config.SAVE_ROOT = os.getenv("USERPROFILE") .. "\\Saved Games\\TheOuterWorlds2"

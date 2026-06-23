@@ -24,10 +24,10 @@ Works **anywhere in gameplay** — you do **not** need the pause **Save Game** m
 |--------|--------|
 | Console: **`oow.s`** or **`oow.save`** | Quick save (always works) |
 | **Ctrl+Shift+O** | Quick save — auto-arms ~10s after you load a save |
-| **Hold LT + LB, tap X** | Quick save (requires [gamepad bridge](#gamepad-bridge) on host) |
+| **Hold LT, click L3+R3** | Quick save ([gamepad bridge](#gamepad-bridge) autostarts at logon) |
 | **`oow.s`** | Console quick save (always works) |
 
-Keyboard uses **RegisterKeyBind**. Gamepad uses **LT+LB+X** (unchanged from the working LEELOO2 setup).
+Keyboard uses **RegisterKeyBind**. Gamepad uses **LT+L3+R3** (hold LT, click both stick buttons).
 
 Optional external fallback: `.\scripts\start-hotkey-binder.ps1` (AutoHotkey) if in-mod binds fail.
 
@@ -72,19 +72,24 @@ Restart the game after every `deploy.ps1` / `enable-mod.ps1` — Lua mods load a
 
 ## Daily use
 
-**In-game or pause menu:** **Ctrl+Shift+O**, **LT+LB+X**, or **`oow.s`** in console.
+**In-game or pause menu:** **Ctrl+Shift+O**, **LT+L3+R3**, or **`oow.s`** in console.
 
 ### Gamepad bridge
 
-UE4SS on WinGDK cannot read the controller in-process (`ffi` unavailable; UE input APIs crash). A small **host script** (shipped with the mod) writes XInput state to a file; the mod reads it — **no reWASD**, same **LT+LB+X** chord.
+UE4SS on WinGDK cannot read the controller in-process (`ffi` unavailable; UE input APIs crash). A small **host script** (shipped with the mod) writes XInput state to a file; the mod reads it — **no reWASD**, **LT+L3+R3** chord.
 
-**Once per gaming session** (before or while the game runs):
+`enable-mod.ps1` and `setup.ps1` install a **logon scheduled task** that starts the bridge automatically — no manual step each session.
+
+If you skipped setup, install once:
 
 ```powershell
-.\scripts\start-gamepad-bridge.ps1
+.\scripts\install-gamepad-bridge-autostart.ps1
 ```
 
-Then load a save and wait ~15s. Log should show `Gamepad bridge: hold LT + LB, tap X = quick save`.
+Manual start (same as autostart uses): `.\scripts\start-gamepad-bridge.ps1`  
+Disable autostart: `.\scripts\remove-gamepad-bridge-autostart.ps1`
+
+After load, wait ~15s. Log should show `Gamepad bridge: hold LT + click L3 and R3 = quick save`.
 
 **After playing (on the host PC):**
 

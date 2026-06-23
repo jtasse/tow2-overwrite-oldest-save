@@ -24,6 +24,7 @@ function SaveCount.parse_count_from_text(text)
         "(%d+)%s+out%s+of%s+" .. max,
         "manual%s+saves?%s*:%s*(%d+)",
         "saves?%s*:%s*(%d+)%s*/%s*" .. max,
+        "(%d+)%s*/%s*" .. max .. "%s*manual",
     }
     for _, pattern in ipairs(patterns) do
         local n = tonumber(string.match(normalized, pattern))
@@ -45,24 +46,25 @@ local function consider_text(text, seen, best_holder)
     end
 end
 
-local function scrape_widget_tree(root, seen, best_holder, depth)
-    if not UiUtil.is_valid(root) or (depth or 0) > 10 then
+local function scrape_menu_root_only(menu_root, seen, best_holder)
+    if not UiUtil.is_valid(menu_root) then
         return
     end
-    if UiUtil.is_widget_visible(root) then
-        local text = UiUtil.get_widget_text(root)
-        if text then
-            consider_text(text, seen, best_holder)
+    local function visit(widget, depth)
+        if not UiUtil.is_valid(widget) or (depth or 0) > 8 then
+            return
         end
-    end
-    UiUtil.iter_widget_tree(root, function(widget)
         if UiUtil.is_widget_visible(widget) then
             local text = UiUtil.get_widget_text(widget)
             if text then
                 consider_text(text, seen, best_holder)
             end
         end
-    end, depth or 0)
+        UiUtil.iter_widget_tree(widget, function(child)
+            visit(child, (depth or 0) + 1)
+        end, depth or 0)
+    end
+    visit(menu_root, 0)
 end
 
 function SaveCount.scrape_save_menu_count()
@@ -73,18 +75,63 @@ function SaveCount.scrape_save_menu_count()
 
     local seen = {}
     local best_holder = { value = nil }
-    scrape_widget_tree(menu_root, seen, best_holder, 0)
+    scrape_menu_root_only(menu_root, seen, best_holder)
     return best_holder.value
 end
 
+function SaveCount.debug_scrape()
+    local menu_root = UiUtil.find_save_load_menu_root(Config.MENU)
+    local lines = {
+        string.format("menu_root=%s", menu_root and UiUtil.safe_name(menu_root) or "nil"),
+    }
+
+    local samples = {}
+    if UiUtil.is_valid(menu_root) then
+        local function sample(widget, depth)
+            if #samples >= 12 or not UiUtil.is_valid(widget) or (depth or 0) > 8 then
+                return
+            end
+            if UiUtil.is_widget_visible(widget) then
+                local text = UiUtil.get_widget_text(widget)
+                if text and text ~= "" and string.find(text, "%d") then
+                    samples[#samples + 1] = string.format("%s -> %q", UiUtil.safe_name(widget), text)
+                end
+            end
+            UiUtil.iter_widget_tree(widget, function(child)
+                sample(child, (depth or 0) + 1)
+            end, depth or 0)
+        end
+        sample(menu_root, 0)
+    end
+
+    if #samples == 0 then
+        lines[#lines + 1] = "no numeric text under SaveLoadMenu root"
+    else
+        for _, line in ipairs(samples) do
+            lines[#lines + 1] = line
+        end
+    end
+
+    local count = SaveCount.scrape_save_menu_count()
+    lines[#lines + 1] = "parsed count: " .. tostring(count)
+    local msg = table.concat(lines, " | ")
+    Log.info("debug_sync: " .. msg)
+    return true, msg
+end
+
 function SaveCount.try_sync_from_pause_ui(force)
-    if not Config.GAMEPLAY_QUICK_SAVE_ENABLED then
+    if Config.PAUSE_UI_SYNC_ENABLED == false then
         return nil
     end
     if not force and os.time() - last_scraped_at < SCRAPE_COOLDOWN_SEC then
         return nil
     end
-    if not UiUtil.is_game_paused() or not UiUtil.is_save_load_menu_open(Config.MENU) then
+
+    local menu_root = UiUtil.find_save_load_menu_root(Config.MENU)
+    if not UiUtil.is_valid(menu_root) then
+        if force then
+            Log.warn("sync skipped: SaveLoadMenu root not found — open pause Save Game tab first")
+        end
         return nil
     end
 
@@ -106,6 +153,24 @@ end
 
 function SaveCount.note_successful_cap_save()
     SavesFs.write_persisted_save_count(cap_max(), "mod_save")
+end
+
+function SaveCount.note_successful_below_cap_save()
+    local prev = SavesFs.read_persisted_save_count()
+    if not prev or prev >= cap_max() then
+        return
+    end
+    SavesFs.write_persisted_save_count(prev + 1, "mod_save")
+end
+
+function SaveCount.sync_now()
+    local count = SaveCount.try_sync_from_pause_ui(true)
+    if not count then
+        return false,
+            "Sync failed — open pause Save Game tab, then oow.sync_count or oow.debug_sync. "
+            .. "Or: oow.set_count N / .\\scripts\\set-save-count.ps1 -Count N"
+    end
+    return true, string.format("Synced from pause UI: %d/%d", count, cap_max())
 end
 
 return SaveCount

@@ -10,4 +10,4 @@ $payload = @{
 Set-Content -LiteralPath $marker -Value $payload -Encoding UTF8
 Write-Host "Cap marker set (100/100) -> $marker"
 Write-Host "In-game: oow.save will DeleteGame oldest + Quicksave."
-Write-Host "After deleting a save in pause menu, run: .\scripts\clear-cap-marker.ps1"
+Write-Host "After deleting saves in pause menu, open Save Game tab (auto-sync) or run: .\scripts\clear-cap-marker.ps1"

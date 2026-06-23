@@ -24,20 +24,41 @@ local function is_quicksave_method(method)
         or (method and string.find(method, "Quicksave", 1, true))
 end
 
+local function is_manual_save_method(method)
+    return method and string.find(method, "SaveGame", 1, true)
+        and not is_quicksave_method(method)
+        and not string.find(method, "bIgnoreSuperNova", 1, true)
+end
+
+local function is_untrusted_console_save(method)
+    return method and (
+        string.find(method, "bIgnoreSuperNova", 1, true)
+        or method == "SaveGame"
+        or method == "SaveGame 0"
+        or method == "SaveGame false"
+    )
+end
+
 local function verify_save_result(oldest, method)
-    if is_quicksave_method(method) and not Config.ALLOW_QUICKSAVE_FALLBACK then
-        return false, "Got Quicksave but manual SaveGame is required — check UE4SS.log"
+    if is_untrusted_console_save(method) then
+        return false, "Console SaveGame did not run — use pause menu Save Game for manual slot"
     end
     if oldest then
         if is_quicksave_method(method) then
             return true, "replaced oldest (Quicksave)"
         end
-        return true, "replaced oldest (SaveGame)"
+        if is_manual_save_method(method) then
+            return true, "replaced oldest (SaveGame)"
+        end
+        return false, "Cap save failed — check UE4SS.log"
+    end
+    if is_manual_save_method(method) then
+        return true, "manual SaveGame OK"
     end
     if is_quicksave_method(method) then
-        return false, "Below cap got Quicksave — manual SaveGame required"
+        return true, "quicksave only — pause menu Save Game adds manual slot"
     end
-    return true, "SaveGame OK"
+    return false, "SaveGame UFunction failed — try pause menu Save Game"
 end
 
 local function finish(ok, msg)
@@ -97,11 +118,16 @@ function QuickSave.run(on_complete)
                 local save_delay = oldest and Config.POST_DELETE_DELAY_MS or 0
                 ExecuteWithDelay(save_delay, function()
                     ExecuteInGameThread(function()
-                        local saved, method
-                        if oldest then
-                            saved, method = SaveManager.save_after_cap_delete()
-                        else
-                            saved, method = SaveManager.save_below_cap()
+                        local ok_save, saved, method = pcall(function()
+                            if oldest then
+                                return SaveManager.save_after_cap_delete()
+                            end
+                            return SaveManager.save_below_cap()
+                        end)
+                        if not ok_save then
+                            local ok_done, msg = finish(false, "FAILED: save error — " .. tostring(saved))
+                            if on_complete then on_complete(ok_done, msg) end
+                            return
                         end
 
                         if not saved then
@@ -133,6 +159,16 @@ function QuickSave.run(on_complete)
                             end
                         else
                             result_msg = "FAILED: " .. verify_detail
+                        end
+                        if verified then
+                            local ok_sc, SaveCount = pcall(require, "save_count")
+                            if ok_sc then
+                                if oldest then
+                                    SaveCount.note_successful_cap_save()
+                                elseif is_manual_save_method(method) then
+                                    SaveCount.note_successful_below_cap_save()
+                                end
+                            end
                         end
                         local ok_done, msg = finish(verified, result_msg)
                         if on_complete then on_complete(ok_done, msg) end

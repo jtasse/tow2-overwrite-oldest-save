@@ -12,6 +12,7 @@ if (-not $GameRoot) {
 }
 $NotifyPs1 = Join-Path $GameRoot "ue4ss\Mods\OverwriteOldestSave\notify.ps1"
 $Ue4ssLog = Join-Path $GameRoot "ue4ss\UE4SS.log"
+$GamepadJson = Join-Path $env:LOCALAPPDATA "OverwriteOldestSave-gamepad.json"
 
 function Show-Balloon([string]$Title, [string]$Message) {
     if (-not (Test-Path -LiteralPath $NotifyPs1)) {
@@ -72,6 +73,27 @@ if ($Balloon) {
         $(if ($map.detail) { $map.detail } else { $map.headline })
     ) -join "`n"
     Show-Balloon $title $msg
+}
+
+Write-Host ""
+Write-Host "=== Gamepad bridge ==="
+. (Join-Path $PSScriptRoot 'lib\gamepad-bridge-host.ps1')
+$bridgeProc = Get-GamepadBridgeRunningProcess
+if ($bridgeProc) {
+    Write-Host "Running (pid $($bridgeProc.ProcessId))"
+} else {
+    Write-Host "Not running — run .\scripts\start-gamepad-bridge.ps1 or .\scripts\install-gamepad-bridge-autostart.ps1"
+}
+if (Test-GamepadBridgeAutostartInstalled) {
+    Write-Host "Autostart: installed (runs at Windows logon)"
+} else {
+    Write-Host "Autostart: not installed — run .\scripts\install-gamepad-bridge-autostart.ps1"
+}
+if (Test-Path -LiteralPath $GamepadJson) {
+    $ageSec = ((Get-Date) - (Get-Item -LiteralPath $GamepadJson).LastWriteTime).TotalSeconds
+    Write-Host ("State file: fresh ({0:N0}s ago)" -f $ageSec)
+} else {
+    Write-Host "State file: missing"
 }
 
 Write-Host ""

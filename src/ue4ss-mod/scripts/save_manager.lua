@@ -220,32 +220,67 @@ end
 
 
 
-local SAVE_GAME_PARAM_SETS = {
-    { false, false, false, false },
-    { false, true, false, false },
-    { false, false, false },
-    { false },
-}
+local function make_fstring(text)
+    if not FString then
+        return nil
+    end
+    local ok, fstr = pcall(function()
+        return FString(text)
+    end)
+    if ok then
+        return fstr
+    end
+    return nil
+end
 
-local function invoke_save_game_ufunc(mgr)
-    local ufunc = resolve_ufunc(mgr, "SaveGame", MANUAL_SAVE_FUNCTION)
+local function invoke_ufunc_on_mgr(mgr, name, static_path, params, label)
+    local ufunc = resolve_ufunc(mgr, name, static_path)
     if not ufunc then
         return false, nil
     end
+    params = params or {}
+    local ok, err = pcall(function()
+        ufunc(mgr, table.unpack(params))
+    end)
+    if ok then
+        Log.info(label .. " OK")
+        return true, label
+    end
+    Log.warn(label .. " failed: " .. tostring(err))
+    return false, nil
+end
 
-    for i, params in ipairs(SAVE_GAME_PARAM_SETS) do
-        local label = string.format("UFunction(SaveGame) params=%d", i)
-        local ok, err = pcall(function()
-            ufunc(mgr, table.unpack(params))
-        end)
+local function invoke_save_game_ufunc(mgr)
+    local tries = {
+        { label = "UFunction(SaveGame) 4xfalse", params = { false, false, false, false } },
+        { label = "UFunction(SaveGame) 4x0", params = { 0, 0, 0, 0 } },
+        { label = "UFunction(SaveGame) 1xfalse", params = { false } },
+    }
+    local empty = make_fstring("")
+    if empty then
+        tries[#tries + 1] = { label = "UFunction(SaveGame) fstr+3false", params = { empty, false, false, false } }
+        tries[#tries + 1] = { label = "UFunction(SaveGame) false+fstr", params = { false, empty, false, false } }
+    end
+
+    for _, try in ipairs(tries) do
+        local ok, detail = invoke_ufunc_on_mgr(mgr, "SaveGame", MANUAL_SAVE_FUNCTION, try.params, try.label)
         if ok then
-            Log.info(label .. " OK")
-            return true, label
+            return true, detail
         end
-        Log.warn(label .. " failed: " .. tostring(err))
+    end
+
+    for _, name in ipairs({ "SaveManualGame", "SaveUserGame" }) do
+        local ok, detail = invoke_ufunc_on_mgr(mgr, name, nil, { false, false, false, false }, "UFunction(" .. name .. ")")
+        if ok then
+            return true, detail
+        end
     end
 
     return false, nil
+end
+
+local function invoke_quicksave_ufunc(mgr)
+    return invoke_ufunc_on_mgr(mgr, "Quicksave", CAP_SAVE_PATHS[1], {}, "UFunction(Quicksave)")
 end
 
 
@@ -267,19 +302,6 @@ local function try_console_save_via_player()
     end
 
     return false, nil
-end
-
-local function make_fstring(text)
-    if not FString then
-        return nil
-    end
-    local ok, fstr = pcall(function()
-        return FString(text)
-    end)
-    if ok then
-        return fstr
-    end
-    return nil
 end
 
 local function invoke_delete_game(mgr, slot_id)
@@ -376,7 +398,7 @@ function SaveManager.delete_slot(slot_id)
         end
     end
 
-    if Config.ALLOW_MGR_CONSOLE_EXEC then
+    if Config.ALLOW_MGR_CONSOLE_EXEC ~= false then
         if exec_on_mgr("DeleteGame " .. id) then
             Log.info("DeleteGame OK for " .. id .. " (ProcessConsoleExec)")
             return true
@@ -432,7 +454,7 @@ local function try_mgr_console_save()
     return false, nil
 end
 
--- Manual SaveGame only — new slot below cap, new slot after delete at cap (same as pause menu Save Game).
+-- Manual SaveGame via UFunction only (console SaveGame is a no-op on TOW2 WinGDK).
 function SaveManager.save_manual_slot()
     local mgr = SaveManager.get()
     if not mgr then
@@ -446,42 +468,56 @@ function SaveManager.save_manual_slot()
         end
     end
 
-    if Config.ALLOW_MGR_CONSOLE_EXEC then
-        local ok, detail = try_mgr_console_save()
-        if ok then
-            return true, detail
-        end
-    end
-
-    local ok, detail = try_console_save_via_player()
-    if ok then
-        return true, detail
-    end
-
     return false, nil
 end
 
 function SaveManager.save_after_cap_delete()
-    -- After DeleteGame at cap, Quicksave fills the freed *manual* slot (WORKING-STATE validated).
-    -- ProcessConsoleExec SaveGame returns true but does not actually save on TOW2 WinGDK.
-    if Config.CAP_SAVE_USE_QUICKSAVE ~= false then
-        local ok, detail = try_commands(CAP_SAVE_COMMANDS, CAP_SAVE_PATHS)
-        if ok then
-            return true, detail
-        end
-        Log.warn("Cap Quicksave failed — trying SaveGame fallback")
+    local mgr = SaveManager.get()
+    if not mgr then
+        return false, nil
     end
-    return SaveManager.save_manual_slot()
-end
 
-function SaveManager.save_below_cap()
     local ok, detail = SaveManager.save_manual_slot()
     if ok then
         return true, detail
     end
+
+    if Config.CAP_SAVE_USE_QUICKSAVE ~= false then
+        Log.warn("Cap UFunction(SaveGame) failed — trying UFunction(Quicksave)")
+        ok, detail = invoke_quicksave_ufunc(mgr)
+        if ok then
+            return true, detail
+        end
+        if Config.ALLOW_MGR_CONSOLE_EXEC then
+            ok, detail = try_commands(CAP_SAVE_COMMANDS, CAP_SAVE_PATHS)
+            if ok then
+                return true, detail
+            end
+        end
+    end
+    return false, nil
+end
+
+function SaveManager.save_below_cap()
+    local mgr = SaveManager.get()
+    if not mgr then
+        return false, nil
+    end
+
+    local ok, detail = SaveManager.save_manual_slot()
+    if ok then
+        return true, detail
+    end
+
     if Config.ALLOW_QUICKSAVE_FALLBACK then
-        Log.warn("SaveGame failed — falling back to Quicksave (limited slot pool).")
-        return try_commands(CAP_SAVE_COMMANDS, CAP_SAVE_PATHS)
+        Log.warn("UFunction(SaveGame) failed — falling back to UFunction(Quicksave)")
+        ok, detail = invoke_quicksave_ufunc(mgr)
+        if ok then
+            return true, detail
+        end
+        if Config.ALLOW_MGR_CONSOLE_EXEC then
+            return try_commands(CAP_SAVE_COMMANDS, CAP_SAVE_PATHS)
+        end
     end
     return false, nil
 end

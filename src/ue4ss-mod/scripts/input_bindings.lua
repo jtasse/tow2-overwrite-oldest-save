@@ -29,8 +29,8 @@ local gamepad_poll_paused_until = 0
 
 local GAMEPAD_KEY_CANDIDATES = {
     hold1 = { "Gamepad_LeftTrigger", "LeftTrigger" },
-    hold2 = { "Gamepad_LeftShoulder", "Gamepad_LeftShoulder_Button", "LeftShoulder" },
-    action = { "Gamepad_FaceButton_Left", "Gamepad_FaceButton_X", "FaceButton_Left" },
+    hold2 = { "Gamepad_LeftThumbstick", "Gamepad_LeftThumb", "LeftThumb" },
+    action = { "Gamepad_RightThumbstick", "Gamepad_RightThumb", "RightThumb" },
 }
 
 local resolved_keys = { hold1 = nil, hold2 = nil, action = nil }
@@ -295,13 +295,18 @@ local function check_gamepad_combo()
     if not (h1 and h2 and act) then
         return
     end
-    if not (is_key_down(pc, h1) and is_key_down(pc, h2)) then
+    if not is_key_down(pc, h1) then
         return
     end
-    if was_key_pressed(pc, act) then
-        Log.info("Gamepad combo: (hold " .. h1 .. " + " .. h2 .. ") + tap " .. act)
-        InputBindings.trigger_quick_save()
+    if is_key_down(pc, h2) and is_key_down(pc, act) then
+        if not InputBindings._prev_stick_chord then
+            Log.info("Gamepad combo: LT + L3 + R3")
+            InputBindings.trigger_quick_save()
+        end
+        InputBindings._prev_stick_chord = true
+        return
     end
+    InputBindings._prev_stick_chord = false
 end
 
 local function poll_gamepad_loop()
@@ -330,7 +335,7 @@ local function install_gamepad_poll()
     ExecuteWithDelay(Config.INPUT.GAMEPAD_POLL_DELAY_MS or 3000, function()
         poll_gamepad_loop()
         Log.info(string.format(
-            "Gamepad poll: (hold %s + %s) + tap %s (LT+LB+X)",
+            "Gamepad poll: hold %s + click %s + %s (LT+L3+R3)",
             resolved_keys.hold1, resolved_keys.hold2, resolved_keys.action
         ))
     end)
@@ -361,7 +366,7 @@ function InputBindings.start_gamepad()
         return InputBindings._gamepad_started
     end
     if Config.INPUT.GAMEPAD_METHOD == "external" then
-        Log.info("Gamepad: use external remap LT+LB+X -> Ctrl+Shift+O (in-mod poll crashes WinGDK)")
+        Log.info("Gamepad: use external remap LT+L3+R3 -> Ctrl+Shift+O (in-mod poll crashes WinGDK)")
         InputBindings._gamepad_started = true
         return true
     end
@@ -459,7 +464,7 @@ function InputBindings.arm_gamepad_after_console()
             InputBindings.start_after_load({ keyboard = false, gamepad = true })
         end)
     end)
-    return true, "Close console. Gamepad (LT+LB+X / hold Back) in ~2s."
+    return true, "Close console. Gamepad (LT+L3+R3 / hold Back) in ~2s."
 end
 
 function InputBindings.discover_gamepad()
@@ -467,7 +472,7 @@ function InputBindings.discover_gamepad()
     local lines = {
         "Gamepad via XInput (same quick save as Ctrl+Shift+O)",
         "mode=" .. tostring(cfg.mode or "chord"),
-        "LT+LB+X chord; hold Back " .. tostring(cfg.hold_back_ms or 700) .. "ms",
+        "LT+L3+R3 chord; hold Back " .. tostring(cfg.hold_back_ms or 700) .. "ms",
     }
     for _, line in ipairs(lines) do
         Log.info(line)

@@ -9,6 +9,7 @@ local Menu = require("menu")
 local UiDiscovery = require("ui_discovery")
 local SaveHealth = require("save_health")
 local InputBindings = require("input_bindings")
+local SaveCount = require("save_count")
 
 Log.info("loaded v" .. Config.MOD_VERSION)
 
@@ -202,10 +203,26 @@ register_oow_command("oow.clear_cap", function()
     return SavesFs.clear_host_cap_marker()
 end)
 
+register_oow_command("oow.sync_count", function()
+    return SaveCount.sync_now()
+end)
+
+register_oow_command("oow.debug_sync", function()
+    return SaveCount.debug_scrape()
+end)
+
+register_oow_command("oow.set_count", function(FullCommand, Parameters)
+    local n = tonumber(Parameters and Parameters[1])
+    if not n then
+        return false, "Usage: oow.set_count 96 (match pause menu x/100)"
+    end
+    return SavesFs.write_persisted_save_count(n, "manual")
+end)
+
 register_oow_command("oow.help", function()
     return true, table.concat({
-        "Ctrl+Shift+O ~10s after load | LT+LB+X (start-gamepad-bridge.ps1)",
-        "oow.s = quick save | oow.set_cap when pause shows 100/100 | oow.clear_cap after deleting a save",
+        "Ctrl+Shift+O ~10s after load | LT+L3+R3 (gamepad bridge autostarts at logon)",
+        "oow.s = quick save | oow.set_count N if sync fails | oow.set_cap at 100/100",
         "oow.save_health = integrity check | oow.reload_cache after refresh-save-cache.ps1",
     }, " | ")
 end)
@@ -256,5 +273,11 @@ register_oow_command("oow.inject_menu", function()
     SavesFs.refresh_cache()
     return Menu.try_inject(true)
 end)
+
+if Config.PAUSE_UI_SYNC_AUTO then
+    Log.warn("PAUSE_UI_SYNC_AUTO is on — may freeze Save Game menu; use oow.sync_count instead")
+else
+    Log.info("Pause UI sync: manual only (oow.sync_count) — auto disabled to avoid menu freeze")
+end
 
 Log.info("Ctrl+Shift+O auto-arms after load | oow.s | oow.help")

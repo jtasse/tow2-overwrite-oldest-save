@@ -16,9 +16,11 @@ local XInputGetState = nil
 
 local BUTTON = {
     BACK = 0x0020,
-    LEFT_SHOULDER = 0x0100,
-    X = 0x4000,
+    LEFT_THUMB = 0x0040,
+    RIGHT_THUMB = 0x0080,
 }
+
+local prev_both_sticks = false
 
 local function band(a, b)
     local result = 0
@@ -92,11 +94,11 @@ end
 local function check_chord(gp, cfg)
     local threshold = cfg.trigger_threshold or 40
     local lt = gp.bLeftTrigger >= threshold
-    local lb = has_flag(gp.wButtons, BUTTON.LEFT_SHOULDER)
-    local x_down = has_flag(gp.wButtons, BUTTON.X)
-    local x_was = has_flag(prev_buttons, BUTTON.X)
-    if lt and lb and x_down and not x_was then
-        return true, "LT+LB+X"
+    local l3 = has_flag(gp.wButtons, BUTTON.LEFT_THUMB)
+    local r3 = has_flag(gp.wButtons, BUTTON.RIGHT_THUMB)
+    local both = l3 and r3
+    if lt and both and not prev_both_sticks then
+        return true, "LT+L3+R3"
     end
     return false, nil
 end
@@ -128,6 +130,7 @@ local function poll_once()
     local gp = read_state()
     if not gp then
         prev_buttons = 0
+        prev_both_sticks = false
         return
     end
 
@@ -142,6 +145,9 @@ local function poll_once()
         fired, via = check_chord(gp, cfg)
     end
 
+    local l3 = has_flag(gp.wButtons, BUTTON.LEFT_THUMB)
+    local r3 = has_flag(gp.wButtons, BUTTON.RIGHT_THUMB)
+    prev_both_sticks = l3 and r3
     prev_buttons = gp.wButtons
 
     if fired and on_trigger then
@@ -177,13 +183,14 @@ function XInputGamepad.start(trigger_fn)
     on_trigger = trigger_fn
     poll_active = true
     prev_buttons = 0
+    prev_both_sticks = false
     back_down_at = nil
     back_fired = false
 
     local cfg = Config.INPUT.XINPUT or {}
     local mode = cfg.mode or "chord"
     if mode == "chord" or mode == "both" then
-        Log.info("Gamepad (XInput): hold LT + LB, tap X = quick save")
+        Log.info("Gamepad (XInput): hold LT + click L3 and R3 = quick save")
     end
     if mode == "hold_back" or mode == "both" then
         Log.info(string.format("Gamepad (XInput): hold Back %dms = quick save", cfg.hold_back_ms or 700))

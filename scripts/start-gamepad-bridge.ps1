@@ -1,21 +1,21 @@
-# Start the XInput bridge (run once per gaming session, outside the game).
+# Start the XInput bridge (idempotent). Autostart is installed by enable-mod / setup.
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'lib\gamepad-bridge-host.ps1')
 
-$scriptDir = $PSScriptRoot
-$bridge = Join-Path $scriptDir 'gamepad-bridge.ps1'
-$marker = Join-Path $env:LOCALAPPDATA 'OverwriteOldestSave-gamepad-bridge.pid'
+$state = Start-GamepadBridge
+$json = Join-Path $env:LOCALAPPDATA 'OverwriteOldestSave-gamepad.json'
 
-$running = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -like '*gamepad-bridge.ps1*' }
-if ($running) {
-    Write-Host 'Gamepad bridge already running.'
-    exit 0
+if ($state.AlreadyRunning) {
+    Write-Host "Gamepad bridge already running (pid $($state.ProcessId))."
+} elseif ($state.Started) {
+    Write-Host "Gamepad bridge started (pid $($state.ProcessId))."
+} else {
+    Write-Warning 'Gamepad bridge did not start — connect a controller and retry.'
 }
 
-$proc = Start-Process -FilePath 'powershell.exe' `
-    -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-File', $bridge) `
-    -PassThru -WindowStyle Hidden
-Set-Content -LiteralPath $marker -Value $proc.Id
-Write-Host "Gamepad bridge started (pid $($proc.Id))."
-Write-Host "LT+LB+X will work in-game after mod loads (~15s)."
-Write-Host "State file: $env:LOCALAPPDATA\OverwriteOldestSave-gamepad.json"
+Write-Host 'Hold LT + click L3 and R3 together in-game after mod loads (~15s).'
+Write-Host "State file: $json"
+
+if (-not (Test-GamepadBridgeAutostartInstalled)) {
+    Write-Host 'Tip: run .\scripts\install-gamepad-bridge-autostart.ps1 so you never need this manually.' -ForegroundColor Cyan
+}

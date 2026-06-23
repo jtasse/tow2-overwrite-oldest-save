@@ -143,7 +143,7 @@ end
 
 function Feedback.show_startup_banner()
     local msg = string.format(
-        "Mod ACTIVE v%s - Ctrl+Shift+O | LT+LB+X (gamepad bridge on host)",
+        "Mod ACTIVE v%s - Ctrl+Shift+O | LT+L3+R3 (gamepad bridge on host)",
         Config.MOD_VERSION
     )
     Log.info("========================================")

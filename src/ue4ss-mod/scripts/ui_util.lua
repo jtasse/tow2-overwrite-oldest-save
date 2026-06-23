@@ -248,6 +248,72 @@ function UiUtil.find_input_widget_class(cfg)
     return nil
 end
 
+function UiUtil.get_widget_text(widget)
+    if not UiUtil.is_valid(widget) then
+        return nil
+    end
+
+    local get_text_paths = {
+        "/Script/UMG.TextBlock:GetText",
+        "/Script/CommonUI.CommonTextBlock:GetText",
+        "/Script/UMG.RichTextBlock:GetText",
+    }
+
+    for _, path in ipairs(get_text_paths) do
+        local ufunc = StaticFindObject(path)
+        if UiUtil.is_valid(ufunc) then
+            local ok, result = pcall(function()
+                return widget:CallFunction(ufunc)
+            end)
+            if ok and result ~= nil then
+                if type(result) == "string" and result ~= "" then
+                    return result
+                end
+                local ok_str, text = pcall(function()
+                    return result:ToString()
+                end)
+                if ok_str and text and text ~= "" and not string.find(text, "FText", 1, true) then
+                    return text
+                end
+            end
+        end
+    end
+
+    local ok_get, direct = pcall(function()
+        return widget:GetText()
+    end)
+    if ok_get and direct ~= nil then
+        if type(direct) == "string" and direct ~= "" then
+            return direct
+        end
+        local ok_str, text = pcall(function()
+            return direct:ToString()
+        end)
+        if ok_str and text and text ~= "" then
+            return text
+        end
+    end
+
+    for _, prop in ipairs({ "Text", "DisplayedText", "ButtonText" }) do
+        local ok, val = pcall(function()
+            return widget[prop]
+        end)
+        if ok and type(val) == "string" and val ~= "" then
+            return val
+        end
+        if ok and val ~= nil then
+            local ok_str, text = pcall(function()
+                return val:ToString()
+            end)
+            if ok_str and text and text ~= "" then
+                return text
+            end
+        end
+    end
+
+    return nil
+end
+
 function UiUtil.set_text_on_widget(widget, text)
     if not UiUtil.is_valid(widget) then
         return false
@@ -426,6 +492,59 @@ function UiUtil.is_our_injected_widget(widget, button_name, injected_row)
         w = UiUtil.get_parent_widget(w)
     end
     return false
+end
+
+function UiUtil.find_save_game_button(cfg)
+    cfg = cfg or {}
+    local menu_root = UiUtil.find_save_load_menu_root(cfg)
+    if not UiUtil.is_valid(menu_root) then
+        return nil
+    end
+
+    local candidates = {}
+    for _, name in ipairs({ "InputWidget_BP_0", "InputWidget_BP", "InputWidget_BP_1" }) do
+        local widget = UiUtil.find_widget_by_name(menu_root, name)
+        if UiUtil.is_valid(widget) and UiUtil.is_widget_visible(widget) then
+            candidates[#candidates + 1] = widget
+        end
+    end
+
+    for _, widget in ipairs(candidates) do
+        local label = UiUtil.get_widget_text(widget) or ""
+        local lower = string.lower(label)
+        if string.find(lower, "save", 1, true) and not string.find(lower, "load", 1, true) then
+            return widget
+        end
+    end
+
+    return candidates[1]
+end
+
+function UiUtil.trigger_widget_click(widget)
+    if not UiUtil.is_valid(widget) then
+        return false, "invalid widget"
+    end
+
+    local click_paths = {
+        "/Script/CommonUI.CommonButtonBase:TriggerClick",
+        "/Script/CommonUI.CommonButtonBase:HandleClicked",
+        "/Script/UMG.Button:Press",
+    }
+
+    for _, path in ipairs(click_paths) do
+        if UiUtil.call_function(widget, path) then
+            return true, path
+        end
+    end
+
+    local ok, err = pcall(function()
+        widget:OnClicked()
+    end)
+    if ok then
+        return true, "OnClicked"
+    end
+
+    return false, tostring(err)
 end
 
 function UiUtil.log_save_load_menu_widgets(limit)
