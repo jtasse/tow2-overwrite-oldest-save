@@ -1,16 +1,62 @@
-# Agent handoff (paste into a chat opened **with this folder** as the workspace)
+# Agent handoff
 
-Continue the TOW2 **Overwrite oldest save** mod.
+TOW2 **quick save** mod (repo name: overwrite-oldest-save).
 
-- **Repo:** `C:\dev\github\tow2-overwrite-oldest-save`
-- **Game:** Xbox PC / Game Pass, version **1.256.9237**
-- **Saves:** at cap (100), backup done
-- **v1:** Pause menu → **Overwrite oldest save** under **Save Game**, only when full → confirmation → overwrite oldest slot
-- **Later:** same action as a row on the save list
-- **Not in scope:** long-press, more save slots mod
-- **Game path:** `C:\XboxGames\The Outer Worlds 2\Content\Arkansas\Binaries\WinGDK\`
-- **Test transfer:** Google Drive to gaming PC; Nexus later
+## Validated state (2026-06-05, LEELOO2)
 
-**Done in repo (v0.1):** modular UE4SS Lua mod, `oow.*` console commands, Ctrl+Shift+O dev confirm, `SaveGame`/`DeleteGame` param logging, filesystem oldest-manual detection under `%USERPROFILE%\Saved Games\TheOuterWorlds2`.
+| Item | Detail |
+|------|--------|
+| Game | Xbox PC / Game Pass **1.256.9237** |
+| Branch | **`develop`** @ 8509bce — not `main` |
+| Working flow | Ctrl+Shift+O / LT+LB+X / `oow.save` → below cap: `Quicksave`; at cap: `DeleteGame` oldest + `Quicksave` |
+| Proof | Log + marker: `QUICK SAVE OK`, `DeleteGame OK`, `SUCCESS: Quick save done` |
+| UE4SS | experimental-latest, **only** `OverwriteOldestSave : 1` |
+| OW2 ini | **6852** B settings + **18293** B VTableLayout (`zCustomGameConfigs.zip`) |
+| `override.txt` | **Must be absent** |
+| Gamepad | **(hold LT + LB) + tap X** — in-game or pause |
+| Input hooks | **Deferred** until `SaveGameManager` ready (`start_after_load`) |
+| Menu inject | **Off** (`AUTO_INJECT = false`) |
 
-**Next:** Install UE4SS on dev PC → run `oow.discover_save` → FModel pause/SaveGame UI → fill `Config.MENU_HOOKS` → wire confirmation widget → tune `DeleteGame`/`SaveGame` args from hook log. See `docs/DISCOVERY.md`.
+Full fingerprint: **[WORKING-STATE.md](./WORKING-STATE.md)**
+
+## Setup entry points
+
+```powershell
+.\scripts\setup.ps1          # first time / full
+.\scripts\enable-mod.ps1     # redeploy
+.\scripts\align-with-working.ps1   # post-repair
+.\scripts\mod-status.ps1     # verify (remote OK)
+```
+
+## Do not reintroduce without testing
+
+- `io.popen` / in-game PowerShell (freezes pause menu)
+- Filesystem delete of save folders from Lua (registry desync)
+- `RegisterHook` on `SaveGameManager` delete/save (crashes)
+- On-screen `PrintString` right after delete (crashed)
+- **Copying game exe** between Game Pass PCs (launcher integrity failure)
+- **`override.txt`** in WinGDK
+- **main-branch** `UE4SS-settings.ini` (6658 B — wrong for OW2)
+- Early keyboard/gamepad hooks at mod **load** time (startup crash/hang)
+
+## Key files
+
+- `scripts/setup.ps1` — one-shot setup
+- `scripts/install-ue4ss-config.ps1` — OW2 ini from experimental zip
+- `scripts/quick_save.lua` — main logic
+- `scripts/input_bindings.lua` — deferred Ctrl+Shift+O; optional gamepad
+- `scripts/save_manager.lua` — `DeleteGame`, `Quicksave`
+- `scripts/saves_fs.lua` — cache JSON
+- `scripts/refresh-save-cache.ps1` — host scan + orphan quarantine
+
+## User-facing docs
+
+- [README.md](../README.md) — setup, controls, troubleshooting
+- [WORKING-STATE.md](./WORKING-STATE.md) — reference install
+- [DISCOVERY.md](./DISCOVERY.md) — APIs, discovery commands
+
+## Open improvements
+
+- Confirm LT+LB+X on pause menu on all controller layouts
+- Configurable overwrite-at-cap on/off, binding remapping in-game
+- Stable pause-menu row calling same `QuickSave.run()`

@@ -1,9 +1,18 @@
 # Copy UE4SS mod into the Game Pass WinGDK install.
 param(
-    [string]$GameRoot = "C:\Program Files\WindowsApps\Microsoft.OE-Arkansas_1.256.9237.0_x64__8wekyb3d8bbwe\Arkansas\Binaries\WinGDK"
+    [string]$GameRoot,
+    [switch]$EnableMod
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib\game-path.ps1")
+
+if (-not $GameRoot) {
+    $GameRoot = Get-Tow2WinGDKRoot
+}
+if (-not $GameRoot) {
+    Write-Error "Could not find TOW2 WinGDK folder. Install UE4SS first (see README.md)."
+}
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Src = Join-Path $RepoRoot "src\ue4ss-mod"
 $Dest = Join-Path $GameRoot "ue4ss\Mods\OverwriteOldestSave"
@@ -23,4 +32,21 @@ if (Test-Path $Dest) {
 
 Copy-Item -LiteralPath $Src -Destination $Dest -Recurse -Force
 Write-Host "Deployed to $Dest"
-Write-Host "Ensure ue4ss\Mods\mods.txt contains: OverwriteOldestSave : 1"
+
+$RefreshScript = Join-Path (Split-Path -Parent $PSScriptRoot) "scripts\refresh-save-cache.ps1"
+if (Test-Path -LiteralPath $RefreshScript) {
+    & $RefreshScript
+}
+
+$Tow2Script = Join-Path (Split-Path -Parent $PSScriptRoot) "scripts\tow2-ue4ss.ps1"
+if (Test-Path -LiteralPath $Tow2Script) {
+    if ($EnableMod) {
+        & $Tow2Script -Action enable-overwrite
+        Write-Host "Mod deployed and ENABLED."
+    } else {
+        & $Tow2Script -Action disable-overwrite
+        Write-Host "Mod deployed but DISABLED - run enable-mod.ps1 when ready."
+    }
+} else {
+    Write-Host "Ensure ue4ss\Mods\mods.txt contains: OverwriteOldestSave : 1 and ConsoleCommandsMod : 1"
+}

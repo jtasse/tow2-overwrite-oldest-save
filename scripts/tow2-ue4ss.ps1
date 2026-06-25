@@ -2,21 +2,41 @@
 # Run: Right-click -> Run with PowerShell (or: powershell -ExecutionPolicy Bypass -File .\scripts\tow2-ue4ss.ps1)
 
 param(
-    [ValidateSet('status', 'disable-overwrite', 'enable-overwrite', 'disable-all-mods', 'minimal-ue4ss', 'recommended', 'enable-ue4ss-only-overwrite', 'disable-ue4ss', 'enable-ue4ss', 'open-log')]
+    [ValidateSet('status', 'disable-overwrite', 'enable-overwrite', 'disable-all-mods', 'minimal-ue4ss', 'recommended', 'enable-ue4ss-only-overwrite', 'disable-ue4ss', 'enable-ue4ss', 'open-log', 'shader-status', 'skip-shaders-on', 'skip-shaders-off', 'skip-shaders-build-cache', 'skip-shaders-fast-boot', 'fix-save-state', 'refresh-save-cache')]
     [string]$Action = 'status'
 )
 
 $ErrorActionPreference = 'Stop'
-$WinGDK = 'C:\Program Files\WindowsApps\Microsoft.OE-Arkansas_1.256.9237.0_x64__8wekyb3d8bbwe\Arkansas\Binaries\WinGDK'
+. (Join-Path $PSScriptRoot 'lib\game-path.ps1')
+
+$WinGDK = Get-Tow2WinGDKRoot
+if (-not $WinGDK) {
+    Write-Error 'TOW2 WinGDK folder not found. Install UE4SS first (see README.md).'
+}
 $Ue4ss = Join-Path $WinGDK 'ue4ss'
 $ModsTxt = Join-Path $Ue4ss 'Mods\mods.txt'
 $EnabledTxt = Join-Path $Ue4ss 'Mods\OverwriteOldestSave\enabled.txt'
+$ModsEnabledTxt = Join-Path $Ue4ss 'Mods\enabled.txt'
 $DwmApi = Join-Path $WinGDK 'dwmapi.dll'
 $DwmApiOff = Join-Path $WinGDK 'dwmapi.dll.off'
-$LogFile = Join-Path $Ue4ss 'UE4SS.log'
+$LogFile = if (Test-Path -LiteralPath (Join-Path $Ue4ss 'UE4SS.log')) {
+    Join-Path $Ue4ss 'UE4SS.log'
+} elseif (Test-Path -LiteralPath (Join-Path $WinGDK 'UE4SS.log')) {
+    Join-Path $WinGDK 'UE4SS.log'
+} else {
+    Join-Path $Ue4ss 'UE4SS.log'
+}
 
 if (-not (Test-Path -LiteralPath $Ue4ss)) {
     Write-Error "UE4SS folder not found: $Ue4ss"
+}
+
+function Remove-StrayEnabledTxt {
+    if (Test-Path -LiteralPath $EnabledTxt) { Remove-Item -LiteralPath $EnabledTxt -Force }
+    if (Test-Path -LiteralPath $ModsEnabledTxt) {
+        Remove-Item -LiteralPath $ModsEnabledTxt -Force
+        Write-Host 'Removed stray Mods\enabled.txt (loads extra mods and can crash).'
+    }
 }
 
 function Set-ModLine([string]$Name, [int]$Value) {
@@ -52,12 +72,12 @@ switch ($Action) {
         }
     }
     'disable-overwrite' {
-        if (Test-Path -LiteralPath $EnabledTxt) { Remove-Item -LiteralPath $EnabledTxt -Force }
+        Remove-StrayEnabledTxt
         Set-ModLine 'OverwriteOldestSave' 0
         Write-Host "OverwriteOldestSave disabled (removed enabled.txt if present)."
     }
     'enable-overwrite' {
-        if (Test-Path -LiteralPath $EnabledTxt) { Remove-Item -LiteralPath $EnabledTxt -Force }
+        Remove-StrayEnabledTxt
         Set-ModLine 'OverwriteOldestSave' 1
         Write-Host "OverwriteOldestSave enabled in mods.txt only."
     }
@@ -78,8 +98,8 @@ switch ($Action) {
         if (Test-Path -LiteralPath $DwmApiOff) {
             Rename-Item -LiteralPath $DwmApiOff -NewName 'dwmapi.dll' -Force
         }
-        Write-Host "UE4SS ON with zero Lua mods (bisect crash). Use Vortex Console Enabler for ~ if needed."
-        Write-Host "If this still crashes, UE4SS core/config is incompatible — try a newer UE4SS experimental build."
+        Write-Host 'UE4SS ON with zero Lua mods (bisect crash). Use Vortex Console Enabler for tilde console if needed.'
+        Write-Host 'If this still crashes, UE4SS core/config is incompatible - try a newer UE4SS experimental build.'
     }
     'recommended' {
         if (Test-Path -LiteralPath $EnabledTxt) { Remove-Item -LiteralPath $EnabledTxt -Force }
@@ -93,8 +113,7 @@ switch ($Action) {
         if (Test-Path -LiteralPath $DwmApiOff) {
             Rename-Item -LiteralPath $DwmApiOff -NewName 'dwmapi.dll' -Force
         }
-        Write-Host "Recommended profile: only OverwriteOldestSave + UE4SS on."
-        Write-Host "Use Vortex Console Enabler for the ~ console."
+        Write-Host 'Recommended profile: only OverwriteOldestSave (stable). Windows toast on startup.'
     }
     'enable-ue4ss-only-overwrite' {
         & $PSCommandPath -Action recommended
@@ -113,5 +132,26 @@ switch ($Action) {
     }
     'open-log' {
         if (Test-Path -LiteralPath $LogFile) { notepad $LogFile } else { Write-Host "No log: $LogFile" }
+    }
+    'shader-status' {
+        & (Join-Path $PSScriptRoot 'skip-shader-warmup.ps1') -Action status
+    }
+    'skip-shaders-on' {
+        & (Join-Path $PSScriptRoot 'skip-shader-warmup.ps1') -Action enable
+    }
+    'skip-shaders-off' {
+        & (Join-Path $PSScriptRoot 'skip-shader-warmup.ps1') -Action disable
+    }
+    'skip-shaders-build-cache' {
+        & (Join-Path $PSScriptRoot 'skip-shader-warmup.ps1') -Action build-cache
+    }
+    'skip-shaders-fast-boot' {
+        & (Join-Path $PSScriptRoot 'skip-shader-warmup.ps1') -Action fast-boot
+    }
+    'fix-save-state' {
+        & (Join-Path $PSScriptRoot 'fix-save-state.ps1')
+    }
+    'refresh-save-cache' {
+        & (Join-Path $PSScriptRoot 'refresh-save-cache.ps1')
     }
 }
